@@ -744,7 +744,8 @@ def self_test():
         assert list(translated_events(map(wire, events), lambda _: '中文。', save_originals)) == list(map(wire, events))
         payload = b': ping\r\nevent: ping\r\ndata: {"type":"ping"}\r\n\r\n'
         assert parse_frame(payload.splitlines(keepends=True)) == (payload, {'type': 'ping'})
-        assert REPLAY.stat().st_mode & 0o077 == 0
+        if os.name != 'nt':
+            assert REPLAY.stat().st_mode & 0o077 == 0
         CLI_KEY = Path(directory) / 'key'
         CLI_KEY.write_bytes(secrets.token_bytes(32))
         headers = {'authorization': 'Bearer test-auth'}
