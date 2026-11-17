@@ -65,17 +65,18 @@ def run_tests(home, upstream, installer=None):
     roaming_data = home / 'Roaming Data'
     data = home / 'XDG Data'
     config = home / 'XDG Config'
+    program_dir = home / 'Programs/ClaudeThinkingTranslation'
     env = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home), 'LOCALAPPDATA': str(local_data),
            'APPDATA': str(roaming_data), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(config)}
 
     def run(*args, check=True):
         if installer and args[0] == 'install':
             if windows_package:
-                return subprocess.run([installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', f'/LOG={home / "setup.log"}'],
-                                      env=env, check=check, timeout=180)
+                return subprocess.run([installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', f'/DIR={program_dir}',
+                                       f'/LOG={home / "setup.log"}'], env=env, check=check, timeout=180)
             return subprocess.run([installer], env=env, check=check, timeout=120)
         if windows_package and args == ('uninstall',):
-            uninstaller, = (local_data / 'Programs/ClaudeThinkingTranslation').glob('unins*.exe')
+            uninstaller, = program_dir.glob('unins*.exe')
             return subprocess.run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], env=env, check=check, timeout=60)
         argv = [python, '-X', 'utf8', runtime / 'install.py'] if installer else [sys.executable, '-X', 'utf8', SOURCE / 'install.py']
         return subprocess.run([*argv, *args], env=env, check=check)
@@ -193,19 +194,22 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert (cc / 'cc-switch.db').read_bytes() == db_before
     finally:
-        if (runtime / 'service.key').is_file():
-            run('desktop-direct', check=False)
-            run('uninstall')
-        if windows_package:
-            path.unlink(missing_ok=True)
-            (library / '_meta.json').unlink(missing_ok=True)
-            library.rmdir()
-            try:
-                library.parent.rmdir()
-            except OSError:
-                pass
-            if (home / 'setup.log').is_file() and sys.exc_info()[0] is not None:
-                print((home / 'setup.log').read_text(encoding='utf-8-sig', errors='replace')[-18000:])
+        try:
+            if (runtime / 'service.key').is_file():
+                run('desktop-direct', check=False)
+                run('uninstall')
+        finally:
+            if windows_package:
+                log = home / 'setup.log'
+                if sys.exc_info()[0] is not None and log.is_file():
+                    print(log.read_text(encoding='utf-8-sig', errors='replace')[-18000:])
+                path.unlink(missing_ok=True)
+                (library / '_meta.json').unlink(missing_ok=True)
+                library.rmdir()
+                try:
+                    library.parent.rmdir()
+                except OSError:
+                    pass
     assert not runtime.exists()
     assert not list(home.glob('**/claude-thinking-translation.desktop'))
     assert not list(home.glob('**/claude-thinking-translation.lnk'))

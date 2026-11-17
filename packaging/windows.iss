@@ -16,6 +16,7 @@ SolidCompression=yes
 SetupLogging=yes
 
 [Files]
+Source: "payload\NOTICES.md"; DestDir: "{app}"
 Source: "payload\*"; DestDir: "{tmp}\payload"; Flags: recursesubdirs createallsubdirs deleteafterinstall
 
 [Run]

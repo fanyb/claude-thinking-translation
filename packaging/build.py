@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -117,6 +118,9 @@ def build_portable(root, downloads, version):
 
 
 if __name__ == '__main__':
+    version = sys.argv[1]
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise SystemExit('Use a numeric major.minor.patch version.')
     DIST.mkdir(exist_ok=True)
     # An optional cache holds the checksum-verified upstream downloads only.
     with tempfile.TemporaryDirectory(prefix='ctt-build-') as temp:
@@ -128,4 +132,4 @@ if __name__ == '__main__':
         if sys.platform == 'darwin':
             build_mac(root, downloads)
         else:
-            build_portable(root, downloads, sys.argv[1])
+            build_portable(root, downloads, version)

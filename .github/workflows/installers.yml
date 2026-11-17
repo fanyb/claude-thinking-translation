@@ -3,6 +3,7 @@ name: Build release installers
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
       version:
@@ -39,7 +40,9 @@ jobs:
         shell: bash
         env:
           CTT_VERSION: ${{ inputs.version || '1.1.0' }}
-        run: python -X utf8 packaging/build.py "$CTT_VERSION"
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then CTT_VERSION="${GITHUB_REF_NAME#v}"; fi
+          python -X utf8 packaging/build.py "$CTT_VERSION"
       - name: Verify macOS image
         if: runner.os == 'macOS'
         run: hdiutil verify dist/*.dmg
@@ -58,3 +61,28 @@ jobs:
           path: dist/*
           compression-level: 0
           if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish all verified installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd assets
+          files=(Claude-Thinking-Translation-macOS-Apple-Silicon.dmg Claude-Thinking-Translation-Windows-x64-Setup.exe
+                 Claude-Thinking-Translation-Linux-x86_64.tar.gz Claude-Thinking-Translation-Linux-aarch64.tar.gz)
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Claude 思考翻译 $GITHUB_REF_NAME" \
+            --notes-file ../packaging/release-notes.md "${files[@]}" SHA256SUMS.txt
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
