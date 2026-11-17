@@ -13,7 +13,7 @@
 | Linux，Intel / AMD 64 位 | `Linux-x86_64.tar.gz` | 在文件管理器解压，打开里面的「安装 Claude 思考翻译」。 |
 | Linux，ARM64 | `Linux-aarch64.tar.gz` | 在文件管理器解压，打开里面的「安装 Claude 思考翻译」。 |
 
-- **macOS** 初次使用系统离线翻译时，在「系统设置 → 通用 → 语言与地区 → 翻译语言」下载英语（美国）和简体中文。当前安装包没有 Apple 公证。若系统阻止打开，确认文件来自这个仓库的 Releases 后，在「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 的打开方式](https://support.apple.com/zh-cn/guide/mac-help/mh40616/mac)
+- **macOS** 初次使用系统离线翻译时，在「系统设置 → 通用 → 语言与地区 → 翻译语言」下载英语（美国）和简体中文。当前安装包没有 Apple 公证。若系统阻止打开，确认文件来自这个仓库的 Releases 后，在「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 的打开方式](https://support.apple.com/zh-cn/guide/mac-help/mh40616/mac) · [macOS 图解安装说明（PDF）](docs/Claude-Thinking-Translation-v1.1.0-macOS-Install-Guide.pdf)
 - **Windows** 当前安装包未做 Authenticode 签名，SmartScreen 可能提示未知发布者。确认下载来源后，可在允许继续的电脑上点「更多信息 → 仍要运行」。如果缺少 Visual C++ 运行库，安装器会联网从 Microsoft 下载并验证签名，Windows 可能要求允许安装。[Microsoft 运行库](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
 - **Linux** 使用 glibc 2.35 或更新版本的桌面发行版，例如 Ubuntu 22.04+、Debian 12+。如果 GNOME 双击未运行，请右键选择「作为程序运行」，默认浏览器会打开面板。Windows 和 Linux 安装包已包含离线模型。
 
