@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import http.client
 from contextlib import closing
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -12,14 +13,16 @@ from pathlib import Path
 from queue import Empty, Queue
 import re
 import secrets
+import shlex
 import shutil
 import sqlite3
 import stat
+from string import Template
 import subprocess
 import sys
 import tempfile
 from threading import Lock, Thread
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent
 ROUTE = ROOT / 'route.json'
@@ -29,7 +32,11 @@ REPLAY = ROOT / 'replay.sqlite3'
 CC_DB = Path.home() / '.cc-switch/cc-switch.db'
 SERVICE_KEY = ROOT / 'service.key'
 PORT = 15722
-LOCAL_URL = f'http://127.0.0.1:{PORT}/claude-desktop'
+ORIGIN = f'http://127.0.0.1:{PORT}'
+LOCAL_URL = f'{ORIGIN}/claude-desktop'
+PANEL = ROOT / 'panel.html'
+PANEL_CSRF = secrets.token_urlsafe(32)
+PANEL_LOCK = Lock()
 HOP = {'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
        'proxy-authorization', 'proxy-authenticate', 'content-length', 'host', 'accept-encoding'}
 THOUGHT = {'thinking', 'redacted_thinking'}
@@ -587,6 +594,9 @@ class Relay(BaseHTTPRequestHandler):
             'type': 'api_error', 'message': message}}, ensure_ascii=False).encode())
 
     def do_GET(self):
+        if self.path == '/_panel' and PANEL.is_file():
+            self.show_panel()
+            return
         if self.path == '/_health':
             credential = self.headers.get('X-Translation-Service-Key')
             if credential is not None and not self.is_manager(credential):
@@ -597,6 +607,9 @@ class Relay(BaseHTTPRequestHandler):
         self.forward()
 
     def do_POST(self):
+        if self.path == '/_panel' and PANEL.is_file():
+            self.change_panel()
+            return
         if self.path == '/_shutdown':
             if not self.is_manager(self.headers.get('X-Translation-Service-Key', '')):
                 self.gateway_error(403, 'Forbidden')
@@ -605,6 +618,66 @@ class Relay(BaseHTTPRequestHandler):
             self.server.shutdown()
             return
         self.forward()
+
+    def show_panel(self, notice='', status=200):
+        if self.headers.get('Host') != f'127.0.0.1:{PORT}':
+            self.gateway_error(403, 'Forbidden')
+            return
+        try:
+            desktop_status = set_mode('status')
+        except (OSError, ValueError, AttributeError):
+            desktop_status = '未找到可用的 Desktop Gateway 配置'
+        try:
+            cli_status = set_cli_mode('status')
+        except (OSError, ValueError, KeyError):
+            cli_status = '无法读取 CLI 状态'
+        args = [sys.executable, str(ROOT / 'install.py'), 'claude']
+        launch = '& ' + ' '.join("'" + arg.replace("'", "''") + "'" for arg in args) if os.name == 'nt' else shlex.join(args)
+        page = Template(PANEL.read_text(encoding='utf-8')).substitute(
+            desktop_status=escape(desktop_status), cli_status=escape(cli_status),
+            notice=escape(notice), csrf=PANEL_CSRF, launch_command=escape(launch),
+        ).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(page)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+        self.end_headers()
+        self.wfile.write(page)
+
+    def change_panel(self):
+        if (self.headers.get('Host') != f'127.0.0.1:{PORT}' or self.headers.get('Origin') != ORIGIN
+                or self.headers.get_content_type() != 'application/x-www-form-urlencoded'
+                or self.headers.get('Transfer-Encoding')):
+            self.gateway_error(403, 'Forbidden')
+            return
+        length = self.headers.get('Content-Length', '')
+        if not re.fullmatch(r'[0-9]{1,3}', length):
+            self.gateway_error(400, 'Invalid form')
+            return
+        self.connection.settimeout(5)
+        try:
+            fields = parse_qs(self.rfile.read(int(length)).decode('ascii'), strict_parsing=True, max_num_fields=2)
+        except (ValueError, TimeoutError):
+            self.gateway_error(400, 'Invalid form')
+            return
+        csrf, = fields['csrf'] if len(fields.get('csrf', [])) == 1 else ('',)
+        if not hmac.compare_digest(csrf.encode(), PANEL_CSRF.encode()):
+            self.gateway_error(403, 'Forbidden')
+            return
+        actions = fields.get('action', [])
+        if len(actions) != 1 or not re.fullmatch(r'(desktop|cli)-(on|off|direct)', actions[0]):
+            self.gateway_error(400, 'Invalid operation')
+            return
+        target, command = actions[0].split('-')
+        with PANEL_LOCK:
+            try:
+                notice = (set_mode if target == 'desktop' else set_cli_mode)(command)
+            except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError, AttributeError, KeyError) as error:
+                self.show_panel(str(error), 409)
+                return
+            self.show_panel(notice)
 
     def is_manager(self, credential):
         return SERVICE_KEY.is_file() and hmac.compare_digest(credential.encode(), SERVICE_KEY.read_bytes())

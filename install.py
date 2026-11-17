@@ -14,6 +14,7 @@ import sys
 import time
 from urllib.request import Request, urlopen
 import venv
+import webbrowser
 from zipfile import ZipFile
 
 import gateway
@@ -39,20 +40,26 @@ def xdg(name, default):
 
 if WINDOWS:
     RUNTIME = Path(os.environ.get('LOCALAPPDATA') or HOME / 'AppData/Local') / SERVICE
-    AUTOSTART = Path(os.environ.get('APPDATA') or HOME / 'AppData/Roaming') / 'Microsoft/Windows/Start Menu/Programs/Startup' / f'{SERVICE}.lnk'
+    programs = Path(os.environ.get('APPDATA') or HOME / 'AppData/Roaming') / 'Microsoft/Windows/Start Menu/Programs'
+    AUTOSTART = programs / 'Startup' / f'{SERVICE}.lnk'
+    SHORTCUT = programs / 'Claude 思考翻译.lnk'
     PYTHON = RUNTIME / 'venv/Scripts/python.exe'
 elif MAC:
     RUNTIME = HOME / 'Library/Application Support' / SERVICE
     AUTOSTART = HOME / 'Library/LaunchAgents' / f'{MAC_LABEL}.plist'
+    SHORTCUT = HOME / 'Applications/Claude 思考翻译.webloc'
     PYTHON = RUNTIME / 'venv/bin/python'
 else:
     RUNTIME = xdg('XDG_DATA_HOME', '.local/share') / SERVICE
     AUTOSTART = xdg('XDG_CONFIG_HOME', '.config') / 'autostart' / f'{SERVICE}.desktop'
+    SHORTCUT = RUNTIME.parent / 'applications' / f'{SERVICE}.desktop'
     PYTHON = RUNTIME / 'venv/bin/python'
 
 MANAGER = RUNTIME / 'install.py'
 KEY = RUNTIME / 'service.key'
 LOG = RUNTIME / 'status.log'
+PANEL_URL = f'{gateway.ORIGIN}/_panel'
+APPLE_APP = HOME / 'Applications/Claude 思考翻译.app'
 
 
 def call_gateway(*args, root=RUNTIME, python=PYTHON):
@@ -126,24 +133,43 @@ def port_in_use():
         return sock.connect_ex(('127.0.0.1', gateway.PORT)) == 0
 
 
-def write_autostart():
-    AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
+def write_entry(path, operation):
+    path.parent.mkdir(parents=True, exist_ok=True)
     if WINDOWS:
         command = "$ErrorActionPreference='Stop'; $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($env:CTT_SHORTCUT); " \
                   "$shortcut.TargetPath=$env:CTT_PYTHON; $shortcut.Arguments=$env:CTT_ARGS; $shortcut.Save()"
-        env = {**os.environ, 'CTT_SHORTCUT': str(AUTOSTART), 'CTT_PYTHON': str(PYTHON.with_name('pythonw.exe')),
-               'CTT_ARGS': subprocess.list2cmdline(['-X', 'utf8', str(MANAGER), 'start'])}
+        env = {**os.environ, 'CTT_SHORTCUT': str(path), 'CTT_PYTHON': str(PYTHON.with_name('pythonw.exe')),
+               'CTT_ARGS': subprocess.list2cmdline(['-X', 'utf8', str(MANAGER), operation])}
         subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], env=env, check=True)
     elif MAC:
-        AUTOSTART.write_bytes(plistlib.dumps({'Label': MAC_LABEL, 'RunAtLoad': True, 'ProgramArguments':
-                                               [str(PYTHON), '-X', 'utf8', str(MANAGER), 'start']}))
+        entry = {'Label': MAC_LABEL, 'RunAtLoad': True, 'ProgramArguments':
+                 [str(PYTHON), '-X', 'utf8', str(MANAGER), operation]} if operation == 'start' else {'URL': PANEL_URL}
+        path.write_bytes(plistlib.dumps(entry))
     else:
         def escape(path):
             text = str(path).replace('%', '%%')
             return '"' + ''.join(('\\' if char in '"`$\\' else '') + char for char in text).replace('\\', '\\\\') + '"'
 
-        AUTOSTART.write_text('[Desktop Entry]\nType=Application\nName=Claude Thinking Translation\n'
-                             f'Exec={escape(PYTHON)} -X utf8 {escape(MANAGER)} start\n', encoding='utf-8')
+        path.write_text('[Desktop Entry]\nType=Application\nName=Claude 思考翻译\nTerminal=false\n'
+                        f'Exec={escape(PYTHON)} -X utf8 {escape(MANAGER)} {operation}\n', encoding='utf-8')
+
+
+def open_panel(portable):
+    if not portable:
+        if subprocess.call(['/usr/bin/open', str(APPLE_APP)]):
+            print(f'可从 Finder 打开 {APPLE_APP}')
+        return
+    if not (RUNTIME / 'panel.html').is_file():
+        raise ValueError('当前安装早于图形面板版。请先恢复直连并卸载旧版，再安装这一版。')
+    start()
+    has_desktop = WINDOWS or MAC or os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')
+    if has_desktop:
+        try:
+            if webbrowser.open(PANEL_URL):
+                return
+        except (OSError, webbrowser.Error):
+            pass
+    print(f'图形面板地址 {PANEL_URL}')
 
 
 def download_model():
@@ -172,11 +198,11 @@ def install_portable():
         raise ValueError('Argos 安装需要 Python 3.10 或以上，推荐 3.12。')
     if MAC and (APPLE / 'gateway.py').exists():
         raise ValueError('已存在 macOS 离线版。可继续使用，或恢复直连并卸载后再安装 Argos。')
-    if any(path.exists() or path.is_symlink() for path in (RUNTIME, AUTOSTART)) or port_in_use():
+    if any(path.exists() or path.is_symlink() for path in (RUNTIME, AUTOSTART, SHORTCUT)) or port_in_use():
         raise ValueError(f'已有安装或端口占用。请先运行 status 检查。安装目录 {RUNTIME}')
     RUNTIME.mkdir(mode=0o700, parents=True)
     try:
-        for file in ('gateway.py', 'argos_worker.py', 'install.py'):
+        for file in ('gateway.py', 'argos_worker.py', 'install.py', 'panel.html'):
             shutil.copyfile(SOURCE / file, RUNTIME / file)
         venv.EnvBuilder(with_pip=True).create(RUNTIME / 'venv')
         subprocess.run([str(PYTHON), '-m', 'pip', 'install', '--only-binary=:all:',
@@ -187,14 +213,16 @@ def install_portable():
             raise ValueError('翻译组件自检失败。')
         KEY.write_text(secrets.token_hex(32), encoding='ascii')
         start()
-        write_autostart()
+        write_entry(AUTOSTART, 'start')
+        write_entry(SHORTCUT, 'panel')
     except (Exception, KeyboardInterrupt):
         if KEY.exists():
             stop()
         AUTOSTART.unlink(missing_ok=True)
+        SHORTCUT.unlink(missing_ok=True)
         remove_runtime()
         raise
-    print('Argos 离线翻译已安装，初始保持直连。按需运行 desktop-on 或 cli-on。')
+    print('Argos 离线翻译已安装。可在「Claude 思考翻译」面板按需开启。')
 
 
 def use_apple():
@@ -206,7 +234,8 @@ def main():
     commands = parser.add_subparsers(dest='operation', required=True)
     setup = commands.add_parser('install')
     setup.add_argument('--engine', choices=('auto', 'apple', 'argos'), default='auto')
-    for name in ('status', 'start', 'check', 'uninstall', 'desktop-on', 'desktop-off', 'desktop-direct',
+    setup.add_argument('--no-open', action='store_true')
+    for name in ('status', 'start', 'panel', 'check', 'uninstall', 'desktop-on', 'desktop-off', 'desktop-direct',
                  'cli-on', 'cli-off', 'cli-direct'):
         commands.add_parser(name)
     commands.add_parser('claude').add_argument('args', nargs=argparse.REMAINDER)
@@ -218,11 +247,17 @@ def main():
             raise ValueError('当前系统不在安装范围。')
         if not WINDOWS and os.getuid() == 0:
             raise ValueError('请用当前用户安装，无需 sudo。')
-        if args.engine == 'apple' or (args.engine == 'auto' and use_apple()):
+        apple = args.engine == 'apple' or (args.engine == 'auto' and use_apple())
+        if apple:
             if not use_apple():
                 raise ValueError('系统离线翻译安装需要 Apple 芯片和 macOS 26 或以上。可改用 --engine argos。')
-            return subprocess.call(['/bin/bash', str(SOURCE / 'install.command')])
-        install_portable()
+            result = subprocess.call(['/bin/bash', str(SOURCE / 'install.command')])
+            if result:
+                return result
+        else:
+            install_portable()
+        if not args.no_open:
+            open_panel(not apple)
         return 0
     return operate(args.operation)
 
@@ -245,6 +280,7 @@ def operate(operation, args=()):
         if gateway_command('check-detached'):
             return 1
         AUTOSTART.unlink(missing_ok=True)
+        SHORTCUT.unlink(missing_ok=True)
         stop()
         remove_runtime()
         print('已卸载本地翻译。')
@@ -262,6 +298,9 @@ def operate(operation, args=()):
     if operation == 'start':
         if portable:
             start()
+        return 0
+    if operation == 'panel':
+        open_panel(portable)
         return 0
     if operation == 'claude':
         mode = RUNTIME / 'cli.json'

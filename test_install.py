@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+from urllib.parse import urlencode
 
 from gateway import PORT, LOCAL_URL, serialize
 
@@ -77,6 +78,16 @@ def run_tests(home, upstream):
             assert response.status == 200, response.read()
             return [json.loads(line[6:]) for line in response if line.startswith(b'data: ')]
 
+    def panel(action=None, origin=f'http://127.0.0.1:{PORT}', token=None, **headers):
+        with closing(HTTPConnection('127.0.0.1', PORT, timeout=20)) as connection:
+            if action is None:
+                connection.request('GET', '/_panel', headers=headers)
+            else:
+                connection.request('POST', '/_panel', urlencode({'csrf': token or csrf, 'action': action}),
+                                   {'Origin': origin, 'Content-Type': 'application/x-www-form-urlencoded', **headers})
+            response = connection.getresponse()
+            return response.status, response.read().decode('utf-8')
+
     library = (local_data if os.name == 'nt' else config) / 'Claude-3p/configLibrary'
     library.mkdir(parents=True)
     profile_id = 'aa322685-7146-4094-84a0-8742a2cc02ab'
@@ -94,21 +105,35 @@ def run_tests(home, upstream):
     runtime = (local_data if os.name == 'nt' else data) / 'claude-thinking-translation'
     python = runtime / ('venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
 
-    run('install')
+    run('install', '--no-open')
     try:
         run('check')
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert not (runtime / 'cli.json').exists()
+        if os.name == 'nt':
+            assert list(roaming_data.glob('**/Claude 思考翻译.lnk'))
+        else:
+            shortcut = data / 'applications/claude-thinking-translation.desktop'
+            assert 'install.py" panel' in shortcut.read_text(encoding='utf-8')
+        status, html = panel()
+        assert status == 200 and '直连 CC Switch' in html and '直连当前供应商' in html
+        csrf = re.search(r'name="csrf" value="([^"]+)"', html)[1]
+        assert panel(Host='untrusted.example')[0] == 403
+        assert panel('desktop-on', origin='https://untrusted.example')[0] == 403
+        assert panel('desktop-on', token='wrong')[0] == 403
+        assert panel('uninstall')[0] == 400
+        assert json.loads(path.read_text(encoding='utf-8')) == previous
         with closing(HTTPConnection('127.0.0.1', PORT, timeout=5)) as connection:
             connection.request('POST', '/_shutdown')
             response = connection.getresponse()
             assert response.status == 403
             response.read()
 
-        run('desktop-on')
+        status, html = panel('desktop-on')
+        assert status == 200 and '已连接离线翻译' in html
         assert json.loads(path.read_text(encoding='utf-8'))['inferenceGatewayBaseUrl'] == LOCAL_URL
         assert run('uninstall', check=False).returncode != 0
-        run('cli-on')
+        assert panel('cli-on')[0] == 200
         code = '''import sys, json, gateway
 gateway.os.execv = lambda exe, args: print(json.loads(args[2])['env']['ANTHROPIC_BASE_URL'].split('/cli/')[1])
 def fake_call(args):
@@ -135,10 +160,10 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
             assert any(e.get('delta', {}).get('signature') == ORIGINAL['signature'] for e in events) == (mode == 'cli')
             replay = {'messages': [{'role': 'assistant', 'content': [{**ORIGINAL, 'thinking': translated}, TOOL]}]}
             assert post(endpoint, replay) == STREAM[-1:]
-            run(mode + '-off')
+            assert panel(mode + '-off')[0] == 200
             assert post(endpoint) == STREAM
             assert post(endpoint, replay) == STREAM[-1:]
-            run(mode + '-direct')
+            assert panel(mode + '-direct')[0] == 200
 
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert (cc / 'cc-switch.db').read_bytes() == db_before
@@ -148,6 +173,7 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
     assert not runtime.exists()
     assert not list(home.glob('**/claude-thinking-translation.desktop'))
     assert not list(home.glob('**/claude-thinking-translation.lnk'))
+    assert not list(home.glob('**/Claude 思考翻译.lnk'))
     print('Fresh install, offline translation, Desktop and CLI tool replay, restore, and uninstall passed.')
 
 

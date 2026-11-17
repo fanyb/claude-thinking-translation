@@ -6,17 +6,27 @@
 
 在要安装的电脑上打开 **本地** Codex 或 Claude Code，把这句话发给它即可。
 
-> 从 https://github.com/fanyb/claude-thinking-translation 帮我在这台电脑上安装 Claude 思考翻译。请读仓库里的 AGENTS.md，自动检测系统、使用默认离线引擎并运行翻译自检。保留我的 CC Switch 供应商、普通 `claude` 和官方更新。告诉我如何开启和恢复。
+> 从 https://github.com/fanyb/claude-thinking-translation 帮我安装 Claude 思考翻译。按 AGENTS.md 自动识别系统，使用默认离线引擎，装好后打开图形面板。保留我的 CC Switch 供应商、普通 `claude` 和官方更新。
 
 若希望顺便开启，可以在这句话后加「同时开启 CLI 翻译」或「同时开启 Desktop 翻译」。安装过程不需要把供应商密钥发给助手。
+
+## 图形面板
+
+安装结束会自动打开 **Claude 思考翻译**。两张卡片分别控制 Claude Desktop 和 Claude Code CLI，各自可以点「开启翻译」「恢复英文」「恢复直连」。后续打开方式如下。
+
+- **macOS 系统离线版**从 Finder 的 `~/Applications` 打开「Claude 思考翻译.app」。使用 Argos 的 Mac 可打开同目录的「Claude 思考翻译」网页快捷方式。
+- **Windows**在开始菜单搜索「Claude 思考翻译」。也可先[下载 ZIP](https://github.com/fanyb/claude-thinking-translation/archive/refs/heads/main.zip)，解压后双击 `install-windows.cmd`。若尚未安装 Python，安装器会打开 Python 官方下载页，装好后再双击安装器。
+- **Linux 桌面**在应用菜单搜索「Claude 思考翻译」。Windows 和 Linux 的面板用默认浏览器显示，页面和翻译服务都在本机。
+
+需要手动重新打开时，可在仓库目录运行 `python3 install.py panel`，Windows 用 `py -3 install.py panel`。WSL 或没有桌面会话的机器可继续用下方命令操作。安装时如需跳过打开窗口，使用 `install --no-open`。
 
 ## 支持范围
 
 | 环境 | 默认引擎 | 使用入口 |
 | --- | --- | --- |
 | macOS 26+，Apple 芯片 | macOS 系统离线翻译 | Claude Code CLI、CC Switch Desktop Gateway、macOS 控制面板 |
-| Windows x64 | Argos 离线 | Claude Code CLI、CC Switch Desktop Gateway，通过命令控制 |
-| Linux x86-64 / ARM64 | Argos 离线 | Claude Code CLI、装有 Claude Desktop 且 CC Switch 已配置 Gateway 时可启用桌面翻译 |
+| Windows x64 | Argos 离线 | 本地图形面板、Claude Code CLI、CC Switch Desktop Gateway |
+| Linux x86-64 / ARM64 | Argos 离线 | 本地图形面板、Claude Code CLI、装有 Claude Desktop 且 CC Switch 已配置 Gateway 时可启用桌面翻译 |
 | WSL | Argos 离线 | 在 WSL 内安装并使用 Linux CLI，使用 WSL 自己的 Claude 配置和可达的供应商 |
 
 macOS 也可用 `install --engine argos`。Argos 需要 Python 3.10+（推荐 3.12）、可用的原生依赖和首次联网下载约 67 MB 模型，之后翻译在本机完成。Windows 若提示缺少 CTranslate2 的 DLL，可按上游文档安装 Microsoft Visual C++ 运行库。[CTranslate2 环境要求](https://opennmt.net/CTranslate2/installation.html)

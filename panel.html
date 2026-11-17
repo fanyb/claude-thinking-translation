@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude 思考翻译</title>
+<style>
+  :root { color-scheme: light dark; --accent: #3157a6; --muted: #536075; --surface: #fff; --background: #f2f5fa; --border: #d8dfeb; --text: #192338; }
+  @media (prefers-color-scheme: dark) {
+    :root { --accent: #a9c5ff; --muted: #b3c0d3; --surface: #202939; --background: #111827; --border: #404d62; --text: #eef3fa; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 system-ui, sans-serif; color: var(--text); background: var(--background); }
+  main { max-width: 45rem; padding: clamp(1rem, 5vw, 3rem); margin: auto; }
+  h1, h2, p { margin: 0; }
+  h1 { margin-bottom: .25rem; font-size: clamp(1.6rem, 5vw, 2.2rem); }
+  h2 { font-size: 1.15rem; }
+  header, section { margin-bottom: 1rem; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 1rem; padding: 1.25rem; }
+  p { color: var(--muted); }
+  .current { color: var(--text); font-weight: 650; margin: .35rem 0 .75rem; }
+  .notice { color: var(--accent); padding: .45rem 0 .85rem; }
+  .notice:empty { display: none; }
+  .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .85rem; }
+  button { padding: .45rem .85rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+  button.primary { color: var(--background); background: var(--accent); border-color: var(--accent); font-weight: 650; }
+  button:focus-visible, code:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { display: block; overflow-wrap: anywhere; margin-top: .45rem; padding: .45rem .65rem; border-radius: .4rem; color: var(--text); background: var(--background); user-select: all; }
+</style>
+<main>
+  <header>
+    <h1>Claude 思考翻译</h1>
+    <p>Argos 离线引擎 · 英语 → 简体中文</p>
+  </header>
+  <p class="notice" role="status">$notice</p>
+  <section aria-labelledby="desktop-heading">
+    <h2 id="desktop-heading">Claude Desktop</h2>
+    <p class="current">$desktop_status</p>
+    <form class="actions" method="post" action="/_panel" aria-labelledby="desktop-heading">
+      <input type="hidden" name="csrf" value="$csrf">
+      <button class="primary" name="action" value="desktop-on">开启翻译</button>
+      <button name="action" value="desktop-off">恢复英文</button>
+      <button name="action" value="desktop-direct">恢复直连</button>
+    </form>
+    <p>先在 CC Switch 启用 Desktop 模型映射。接入翻译或恢复直连后，重启 Claude，再切到 Thinking 视图。</p>
+  </section>
+  <section aria-labelledby="cli-heading">
+    <h2 id="cli-heading">Claude Code CLI</h2>
+    <p class="current">$cli_status</p>
+    <form class="actions" method="post" action="/_panel" aria-labelledby="cli-heading">
+      <input type="hidden" name="csrf" value="$csrf">
+      <button class="primary" name="action" value="cli-on">开启翻译</button>
+      <button name="action" value="cli-off">恢复英文</button>
+      <button name="action" value="cli-direct">恢复直连</button>
+    </form>
+    <p>在终端粘贴下方命令启动翻译会话。切换供应商或恢复直连后，重开会话。</p>
+    <code tabindex="0" dir="ltr">$launch_command</code>
+  </section>
+</main>
+</html>
