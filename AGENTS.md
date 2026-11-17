@@ -4,4 +4,4 @@
 - 运行 `python3 install.py install`（Windows 替换 Python 启动命令），安装后会打开图形面板。默认在 Apple 芯片 macOS 26+ 用系统离线引擎，在 Windows/Linux/其他支持的 macOS 用 Argos。苹果系统语言包或命令行工具缺失时，请向用户说明确切的系统操作；只有用户选择换引擎才改用 `--engine argos`。
 - 安装后依次运行 `python3 install.py check` 和 `python3 install.py status`。尚未配置 Desktop Gateway 的电脑可用于 CLI。不要输出或复制现有 API 密钥、配置文件全文或会话内容。自检不调用供应商。
 - 只在用户要求开启时执行 `cli-on` 或 `desktop-on`。`desktop-on` 前应已有 CC Switch 本地模型映射。保留普通 `claude` 和现有供应商，不改应用程序安装包或开发者模式。已安装时先检查状态，避免覆盖或卸载现有版本。
-- 向用户说明实际引擎和通过的自检，优先引导使用面板的按钮。Windows 从开始菜单、Linux 从应用菜单、macOS 从 `~/Applications` 打开，或运行 `python3 install.py panel`。CLI 的启动命令在面板中，Desktop 在完全退出并重新打开 Claude 后选 Thinking 视图。在用户同意发测试消息时再验证真实供应商和工具调用。
+- 向用户说明实际引擎和通过的自检，优先引导使用面板的按钮。Windows 从开始菜单搜索 Claude Thinking Translation，Linux 从应用菜单、macOS 从 `~/Applications` 打开，也可运行 `python3 install.py panel`。CLI 的启动命令在面板中，Desktop 在完全退出并重新打开 Claude 后选 Thinking 视图。在用户同意发测试消息时再验证真实供应商和工具调用。

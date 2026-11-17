@@ -42,7 +42,7 @@ if WINDOWS:
     RUNTIME = Path(os.environ.get('LOCALAPPDATA') or HOME / 'AppData/Local') / SERVICE
     programs = Path(os.environ.get('APPDATA') or HOME / 'AppData/Roaming') / 'Microsoft/Windows/Start Menu/Programs'
     AUTOSTART = programs / 'Startup' / f'{SERVICE}.lnk'
-    SHORTCUT = programs / 'Claude 思考翻译.lnk'
+    SHORTCUT = programs / 'Claude Thinking Translation.lnk'
     PYTHON = RUNTIME / 'venv/Scripts/python.exe'
 elif MAC:
     RUNTIME = HOME / 'Library/Application Support' / SERVICE

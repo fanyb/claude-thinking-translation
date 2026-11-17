@@ -113,7 +113,7 @@ def run_tests(home, upstream):
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert not (runtime / 'cli.json').exists()
         if os.name == 'nt':
-            assert list(roaming_data.glob('**/Claude 思考翻译.lnk'))
+            assert list(roaming_data.glob('**/Claude Thinking Translation.lnk'))
         else:
             shortcut = data / 'applications/claude-thinking-translation.desktop'
             assert 'install.py" panel' in shortcut.read_text(encoding='utf-8')
@@ -175,7 +175,7 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
     assert not runtime.exists()
     assert not list(home.glob('**/claude-thinking-translation.desktop'))
     assert not list(home.glob('**/claude-thinking-translation.lnk'))
-    assert not list(home.glob('**/Claude 思考翻译.lnk'))
+    assert not list(home.glob('**/Claude Thinking Translation.lnk'))
     print('Fresh install, offline translation, Desktop and CLI tool replay, restore, and uninstall passed.')
 
 

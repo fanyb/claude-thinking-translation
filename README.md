@@ -15,7 +15,7 @@
 安装结束会自动打开 **Claude 思考翻译**。两张卡片分别控制 Claude Desktop 和 Claude Code CLI，各自可以点「开启翻译」「恢复英文」「恢复直连」。后续打开方式如下。
 
 - **macOS 系统离线版**从 Finder 的 `~/Applications` 打开「Claude 思考翻译.app」。使用 Argos 的 Mac 可打开同目录的「Claude 思考翻译」网页快捷方式。
-- **Windows**在开始菜单搜索「Claude 思考翻译」。也可先[下载 ZIP](https://github.com/fanyb/claude-thinking-translation/archive/refs/heads/main.zip)，解压后双击 `install-windows.cmd`。若尚未安装 Python，安装器会打开 Python 官方下载页，装好后再双击安装器。
+- **Windows**在开始菜单搜索「Claude Thinking Translation」。也可先[下载 ZIP](https://github.com/fanyb/claude-thinking-translation/archive/refs/heads/main.zip)，解压后双击 `install-windows.cmd`。若尚未安装 Python，安装器会打开 Python 官方下载页，装好后再双击安装器。
 - **Linux 桌面**在应用菜单搜索「Claude 思考翻译」。Windows 和 Linux 的面板用默认浏览器显示，页面和翻译服务都在本机。
 
 需要手动重新打开时，可在仓库目录运行 `python3 install.py panel`，Windows 用 `py -3 install.py panel`。WSL 或没有桌面会话的机器可继续用下方命令操作。安装时如需跳过打开窗口，使用 `install --no-open`。
