@@ -4,6 +4,7 @@ import copy
 import hashlib
 import hmac
 import http.client
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -114,7 +115,7 @@ def check_detached():
 
 
 def cc_key():
-    with sqlite3.connect(CC_DB.as_uri() + '?mode=ro', uri=True, timeout=2) as db:
+    with closing(sqlite3.connect(CC_DB.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
         row = db.execute("SELECT value FROM settings WHERE key='claude_desktop_gateway_token'").fetchone()
     return row[0].strip() if row else ''
 
@@ -279,7 +280,7 @@ def write_profile(path, expected, new_url):
 
 def replay_ready():
     try:
-        with sqlite3.connect(REPLAY, timeout=3) as db:
+        with closing(sqlite3.connect(REPLAY, timeout=3)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS replay (key TEXT PRIMARY KEY, blocks TEXT NOT NULL)')
             db.execute('BEGIN IMMEDIATE')
             db.rollback()
@@ -293,7 +294,7 @@ def replay_key(ids):
 
 
 def save_originals(ids, originals):
-    with sqlite3.connect(REPLAY, timeout=5) as db:
+    with closing(sqlite3.connect(REPLAY, timeout=5)) as db, db:
         db.execute('INSERT OR REPLACE INTO replay VALUES (?, ?)',
                    (replay_key(ids), json.dumps(originals, ensure_ascii=False)))
 
@@ -302,7 +303,7 @@ def restore_originals(body):
     if not REPLAY.exists() or not isinstance(body.get('messages'), list):
         return 0
     restored = 0
-    with sqlite3.connect(REPLAY, timeout=5) as db:
+    with closing(sqlite3.connect(REPLAY, timeout=5)) as db:
         for message in body['messages']:
             content = message.get('content') if isinstance(message, dict) else None
             if not isinstance(content, list) or message.get('role') != 'assistant':
@@ -328,7 +329,7 @@ def signature_key(signature):
 
 def save_signature(block):
     key = signature_key(block['signature'])
-    with sqlite3.connect(REPLAY, timeout=5) as db:
+    with closing(sqlite3.connect(REPLAY, timeout=5)) as db, db:
         db.execute('INSERT OR IGNORE INTO replay VALUES (?, ?)', (key, json.dumps(block, ensure_ascii=False)))
 
 
@@ -336,7 +337,7 @@ def restore_signatures(body):
     if not REPLAY.exists() or not isinstance(body.get('messages'), list):
         return 0
     restored = 0
-    with sqlite3.connect(REPLAY, timeout=5) as db:
+    with closing(sqlite3.connect(REPLAY, timeout=5)) as db:
         for message in body['messages']:
             if not isinstance(message, dict) or message.get('role') != 'assistant':
                 continue
