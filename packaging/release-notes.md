@@ -1,3 +1,7 @@
+## v1.1.1 更新
+
+修复 macOS 上 cmux 启动或恢复 Claude Code 会话时跳过离线翻译的问题。CLI 会继续使用 cmux 的侧栏和通知设置。[cmux 设置与恢复会话说明](https://github.com/fanyb/claude-thinking-translation#在-cmux-中使用-cli)
+
 ## 选电脑对应的安装包
 
 四个安装包都自带运行环境。安装时用图形界面操作，完成后自动打开「Claude 思考翻译」面板。面板里可以分别开启 Desktop 和 CLI 的翻译、恢复英文或恢复直连。

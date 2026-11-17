@@ -194,13 +194,35 @@ def cli_target(ticket, headers):
     return cli_upstream(base)
 
 
+def cmux_launch_settings(args):
+    if not os.environ.get('CMUX_SURFACE_ID') or args.count('--settings') != 1:
+        return None
+    index = args.index('--settings')
+    if index + 1 >= len(args):
+        return None
+    path = Path(args[index + 1])
+    if path.parent != Path.home() / '.cmuxterm/claude-settings' or not re.fullmatch(r'[a-f0-9]{32,64}\.json', path.name):
+        return None
+    try:
+        options = load(path)
+    except (OSError, ValueError):
+        return None
+    # cmux can also merge explicit user overrides into this file. Leave those alone.
+    if not isinstance(options, dict) or options.keys() - {'hooks', 'preferredNotifChannel'}:
+        return None
+    return options, args[:index] + args[index + 2:]
+
+
 def launch_cli(args):
     forwarded = args
     # Leave explicit session configuration and native maintenance commands with Claude Code.
     bypass = {'update', 'upgrade', 'install', 'doctor', 'setup-token', 'auth', '--version', '-v', '--help', '-h'}
-    overrides = any(a.split('=', 1)[0] in ('--settings', '--setting-sources', '--bare') for a in args)
+    flags = args[:args.index('--')] if '--' in args else args
+    overrides = [flag for flag in flags if flag.split('=', 1)[0] in ('--settings', '--setting-sources', '--bare')]
     state = cli_mode()
-    if state != 'direct' and not (set(args[:1]) & bypass or overrides):
+    cmux = cmux_launch_settings(args) if state != 'direct' and overrides == ['--settings'] else None
+    if state != 'direct' and not set(args[:1]) & bypass and (not overrides or cmux is not None):
+        options, model_args = cmux if cmux is not None else ({}, args)
         settings = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'settings.json'
         env = load(settings).get('env', {}) if settings.exists() else {}
         base = env.get('ANTHROPIC_BASE_URL')
@@ -212,7 +234,7 @@ def launch_cli(args):
             healthy, health = probe(PORT, '/_health')
             if not healthy or json.loads(health).get('cli') is not True:
                 raise ValueError('CLI 翻译服务暂时不可用。可运行普通 claude 暂时恢复直连。')
-            options = {'env': {'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{PORT}/cli/{ticket}'}}
+            options['env'] = {'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{PORT}/cli/{ticket}'}
             model = (env.get('ANTHROPIC_MODEL') or '').partition('[')[0]
             display = []
             if CLI_THINKING.fullmatch(model) or model == 'ark-code-latest':
@@ -222,7 +244,7 @@ def launch_cli(args):
                 if not any(a.split('=', 1)[0] == '--thinking-display' for a in args):
                     display = ['--thinking-display', 'summarized']
             forwarded = ['--settings', json.dumps(options), *display]
-            forwarded += args
+            forwarded += model_args
     command = 'claude.exe' if os.name == 'nt' else 'claude'
     native = Path.home() / '.local/bin' / command
     claude = str(native) if native.is_file() else shutil.which(command)
@@ -788,6 +810,8 @@ class Relay(BaseHTTPRequestHandler):
 
 
 def self_test():
+    from unittest.mock import patch
+
     global REPLAY, CLI_KEY
     with tempfile.TemporaryDirectory() as directory:
         REPLAY = Path(directory) / 'private.sqlite3'
@@ -840,6 +864,15 @@ def self_test():
         assert restore_signatures(body) == 1 and body['messages'][0]['content'] == [original]
         assert supported_model('auto', True, 'ark-code-latest') and not supported_model('auto', False, 'ark-code-latest')
         assert not supported_model('auto', True, 'unknown-model')
+        cmux_settings = Path(directory) / '.cmuxterm/claude-settings' / ('a' * 32 + '.json')
+        cmux_settings.parent.mkdir(parents=True)
+        options = {'hooks': {'Stop': []}, 'preferredNotifChannel': 'terminal_bell'}
+        atomic_json(cmux_settings, options)
+        args = ['--settings', str(cmux_settings), '--resume', 'session-id']
+        with patch.object(Path, 'home', return_value=Path(directory)), patch.dict(os.environ, CMUX_SURFACE_ID='test'):
+            assert cmux_launch_settings(args) == (options, ['--resume', 'session-id'])
+            atomic_json(cmux_settings, {**options, 'env': {'ANTHROPIC_BASE_URL': 'https://service.example'}})
+            assert cmux_launch_settings(args) is None
     print('SSE, passthrough, signed CLI routing and tool replay passed.')
 
 
