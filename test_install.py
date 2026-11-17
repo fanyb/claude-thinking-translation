@@ -86,6 +86,8 @@ def run_tests(home, upstream):
                 connection.request('POST', '/_panel', urlencode({'csrf': token or csrf, 'action': action}),
                                    {'Origin': origin, 'Content-Type': 'application/x-www-form-urlencoded', **headers})
             response = connection.getresponse()
+            if response.status == 200:
+                assert response.getheader('Referrer-Policy') == 'same-origin'
             return response.status, response.read().decode('utf-8')
 
     library = (local_data if os.name == 'nt' else config) / 'Claude-3p/configLibrary'

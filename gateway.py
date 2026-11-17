@@ -641,7 +641,7 @@ class Relay(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(page)))
         self.send_header('Cache-Control', 'no-store')
-        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Referrer-Policy', 'same-origin')
         self.send_header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         self.wfile.write(page)
@@ -662,8 +662,8 @@ class Relay(BaseHTTPRequestHandler):
         except (ValueError, TimeoutError):
             self.gateway_error(400, 'Invalid form')
             return
-        csrf, = fields['csrf'] if len(fields.get('csrf', [])) == 1 else ('',)
-        if not hmac.compare_digest(csrf.encode(), PANEL_CSRF.encode()):
+        csrf = fields.get('csrf', [])
+        if len(csrf) != 1 or not hmac.compare_digest(csrf[0].encode(), PANEL_CSRF.encode()):
             self.gateway_error(403, 'Forbidden')
             return
         actions = fields.get('action', [])
