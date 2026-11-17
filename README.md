@@ -41,7 +41,7 @@
 
 1. 在 Mac 上安装 v1.1.1 或更新版本，并在「Claude 思考翻译」面板的 CLI 卡片点「开启翻译」。
 2. 在 cmux 的「设置 → 自动化（Automation）→ Claude Binary Path」填入 `~/.local/bin/claude-zh` 的完整路径。可在终端运行 `printf '%s\n' "$HOME/.local/bin/claude-zh"` 查看路径。[cmux 配置说明](https://cmux.com/docs/configuration#automation)
-3. 在 cmux 新终端运行 `claude` 开始新会话。要继续旧会话，等当前任务结束后，在原会话输入 `/exit`，再在同一项目目录运行 `claude --resume` 并选回原会话。
+3. 新开一个 cmux 终端，运行 `claude` 开始新会话。要继续旧会话，等当前任务结束后，在原会话输入 `/exit`，然后到新开的 cmux 终端，在同一项目目录运行 `claude --resume` 并选回原会话。
 
 恢复会话后发出的新请求会使用翻译，已有的英文思考记录会保留。思考区折叠时按 **Ctrl+O** 展开。侧栏状态继续由 cmux 更新，思考区的显示时机由 Claude Code 控制。
 
