@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+import time
 from urllib.parse import urlencode
 
 from gateway import PORT, LOCAL_URL, serialize
@@ -61,7 +62,7 @@ class Upstream(BaseHTTPRequestHandler):
 
 def run_tests(home, upstream, installer=None):
     windows_package = installer is not None and os.name == 'nt'
-    local_data = Path(os.environ['LOCALAPPDATA']) if windows_package else home / 'Local Data'
+    local_data = home / 'Local Data'
     roaming_data = home / 'Roaming Data'
     data = home / 'XDG Data'
     config = home / 'XDG Config'
@@ -77,7 +78,14 @@ def run_tests(home, upstream, installer=None):
             return subprocess.run([installer], env=env, check=check, timeout=120)
         if windows_package and args == ('uninstall',):
             uninstaller, = program_dir.glob('unins*.exe')
-            return subprocess.run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], env=env, check=check, timeout=60)
+            result = subprocess.run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', f'/LOG={home / "uninstall.log"}'],
+                                    env=env, check=check, timeout=60)
+            # Inno may return from its original process while the copy in %TEMP% is finishing.
+            for _ in range(100):
+                if not runtime.exists() and not uninstaller.exists():
+                    break
+                time.sleep(0.1)
+            return result
         argv = [python, '-X', 'utf8', runtime / 'install.py'] if installer else [sys.executable, '-X', 'utf8', SOURCE / 'install.py']
         return subprocess.run([*argv, *args], env=env, check=check)
 
@@ -198,11 +206,13 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
             if (runtime / 'service.key').is_file():
                 run('desktop-direct', check=False)
                 run('uninstall')
+            assert not runtime.exists()
         finally:
             if windows_package:
-                log = home / 'setup.log'
-                if sys.exc_info()[0] is not None and log.is_file():
-                    print(log.read_text(encoding='utf-8-sig', errors='replace')[-18000:])
+                if sys.exc_info()[0] is not None:
+                    for log in (home / 'setup.log', home / 'uninstall.log'):
+                        if log.is_file():
+                            print(log.read_text(encoding='utf-8-sig', errors='replace')[-18000:])
                 path.unlink(missing_ok=True)
                 (library / '_meta.json').unlink(missing_ok=True)
                 library.rmdir()
@@ -210,7 +220,6 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
                     library.parent.rmdir()
                 except OSError:
                     pass
-    assert not runtime.exists()
     assert not list(home.glob('**/claude-thinking-translation.desktop'))
     assert not list(home.glob('**/claude-thinking-translation.lnk'))
     assert not list(home.glob('**/Claude Thinking Translation.lnk'))

@@ -20,7 +20,7 @@ Source: "payload\NOTICES.md"; DestDir: "{app}"
 Source: "payload\*"; DestDir: "{tmp}\payload"; Flags: recursesubdirs createallsubdirs deleteafterinstall
 
 [Run]
-Filename: "{localappdata}\claude-thinking-translation\venv\pythonw.exe"; Parameters: "-E -s -X utf8 ""{localappdata}\claude-thinking-translation\install.py"" panel"; Description: "Open Claude Thinking Translation"; Flags: postinstall nowait skipifsilent
+Filename: "{code:Runtime}\venv\pythonw.exe"; Parameters: "-E -s -X utf8 ""{code:Runtime}\install.py"" panel"; Description: "Open Claude Thinking Translation"; Flags: postinstall nowait skipifsilent
 
 [Code]
 var
@@ -31,9 +31,11 @@ begin
   RuntimeDownload := CreateDownloadPage('Visual C++ Runtime', 'Installing the Microsoft runtime required for offline translation.', nil);
 end;
 
-function Runtime: String;
+function Runtime(Param: String): String;
 begin
-  Result := ExpandConstant('{localappdata}\claude-thinking-translation');
+  Result := GetEnv('LOCALAPPDATA');
+  if Result = '' then Result := ExpandConstant('{localappdata}');
+  Result := AddBackslash(Result) + 'claude-thinking-translation';
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -43,7 +45,7 @@ var
   FilePath, LiteralPath, Verify: String;
 begin
   Result := '';
-  if DirExists(Runtime) or FileExists(Runtime) then begin
+  if DirExists(Runtime('')) or FileExists(Runtime('')) then begin
     Result := '已存在 Claude 思考翻译。请先在原面板恢复直连并卸载已有版本。';
     exit;
   end;
@@ -98,14 +100,18 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Code, Attempt: Integer;
+  Directory: String;
 begin
-  if (CurUninstallStep <> usUninstall) or not DirExists(Runtime) then exit;
-  if not FileExists(Runtime + '\.installed-by-package') or
-     not Exec(Runtime + '\venv\python.exe', '-E -s -X utf8 "' + Runtime + '\install.py" prepare-uninstall',
-              Runtime, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+  if CurUninstallStep <> usUninstall then exit;
+  Directory := Runtime('');
+  Log('Checking translation runtime at ' + Directory);
+  if not DirExists(Directory) then exit;
+  if not FileExists(Directory + '\.installed-by-package') or
+     not ExecAndLogOutput(Directory + '\venv\python.exe', '-E -s -X utf8 "' + Directory + '\install.py" prepare-uninstall',
+                          Directory, SW_SHOW, ewWaitUntilTerminated, Code, nil) or (Code <> 0) then
     RaiseException('请先在翻译面板恢复 Desktop 和 CLI 直连，退出相关会话，再试一次卸载。');
   for Attempt := 1 to 20 do begin
-    if DelTree(Runtime, True, True, True) or not DirExists(Runtime) then exit;
+    if DelTree(Directory, True, True, True) or not DirExists(Directory) then exit;
     Sleep(150);
   end;
   RaiseException('翻译目录仍在使用。请关闭翻译会话后重试。');
