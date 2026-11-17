@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -59,7 +60,7 @@ def runtime(payload, downloads):
     return python
 
 
-def build_mac(root, downloads):
+def build_mac(root, downloads, version):
     app = root / '安装 Claude 思考翻译.app'
     contents = app / 'Contents'
     payload = contents / 'Resources/Payload'
@@ -71,8 +72,10 @@ def build_mac(root, downloads):
     runtime(payload, downloads)
     for name in ('install.command', 'gateway.py', 'claude-zh', 'LICENSE'):
         shutil.copy2(SOURCE / name, payload / name)
-    shutil.copy2(SOURCE / 'Info.plist', dashboard / 'Contents')
-    shutil.copy2(HERE / 'Installer.plist', contents / 'Info.plist')
+    for template, bundle in ((SOURCE / 'Info.plist', dashboard), (HERE / 'Installer.plist', app)):
+        info = plistlib.loads(template.read_bytes())
+        info.update(CFBundleShortVersionString=version, CFBundleVersion=version)
+        (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
     run('/bin/bash', HERE / 'build-worker.sh', sys.executable, SOURCE / 'TranslationWorker.swift', payload / 'translation-worker')
     for source, output in ((SOURCE / 'Controls.m', dashboard_bin / 'ClaudeOfflineTranslation'),
                            (HERE / 'Installer.m', installer_bin / 'Installer')):
@@ -130,6 +133,6 @@ if __name__ == '__main__':
         root = temp / 'package'
         root.mkdir()
         if sys.platform == 'darwin':
-            build_mac(root, downloads)
+            build_mac(root, downloads, version)
         else:
             build_portable(root, downloads, version)
