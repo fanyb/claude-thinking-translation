@@ -59,17 +59,26 @@ class Upstream(BaseHTTPRequestHandler):
             self.respond('text/event-stream', b''.join(map(serialize, STREAM)))
 
 
-def run_tests(home, upstream):
-    local_data = home / 'Local Data'
+def run_tests(home, upstream, installer=None):
+    windows_package = installer is not None and os.name == 'nt'
+    local_data = Path(os.environ['LOCALAPPDATA']) if windows_package else home / 'Local Data'
     roaming_data = home / 'Roaming Data'
     data = home / 'XDG Data'
     config = home / 'XDG Config'
     env = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home), 'LOCALAPPDATA': str(local_data),
            'APPDATA': str(roaming_data), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(config)}
 
-    def run(*args, check=True, output=False):
-        return subprocess.run([sys.executable, '-X', 'utf8', str(SOURCE / 'install.py'), *args], env=env,
-                              check=check, stdout=subprocess.PIPE if output else None, text=True, encoding='utf-8')
+    def run(*args, check=True):
+        if installer and args[0] == 'install':
+            if windows_package:
+                return subprocess.run([installer, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', f'/LOG={home / "setup.log"}'],
+                                      env=env, check=check, timeout=180)
+            return subprocess.run([installer], env=env, check=check, timeout=120)
+        if windows_package and args == ('uninstall',):
+            uninstaller, = (local_data / 'Programs/ClaudeThinkingTranslation').glob('unins*.exe')
+            return subprocess.run([uninstaller, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], env=env, check=check, timeout=60)
+        argv = [python, '-X', 'utf8', runtime / 'install.py'] if installer else [sys.executable, '-X', 'utf8', SOURCE / 'install.py']
+        return subprocess.run([*argv, *args], env=env, check=check)
 
     def post(endpoint, body=None):
         with closing(HTTPConnection('127.0.0.1', PORT, timeout=20)) as connection:
@@ -105,10 +114,21 @@ def run_tests(home, upstream):
     db.close()
     db_before = (cc / 'cc-switch.db').read_bytes()
     runtime = (local_data if os.name == 'nt' else data) / 'claude-thinking-translation'
-    python = runtime / ('venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
+    assert not runtime.exists()
+    python = runtime / ('venv/python.exe' if windows_package else 'venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
+    browser_log = home / 'opened-panel.txt'
+    if installer and not windows_package:
+        fake_browser = home / 'browser'
+        fake_browser.write_text('#!/bin/sh\nprintf "%s" "$1" > "$CTT_BROWSER_LOG"\n', encoding='utf-8')
+        fake_browser.chmod(0o755)
+        env.update(BROWSER=str(fake_browser), DISPLAY=':0', CTT_BROWSER_LOG=str(browser_log))
 
-    run('install', '--no-open')
     try:
+        run('install', '--no-open')
+        if installer:
+            assert (runtime / '.installed-by-package').is_file()
+            if not windows_package:
+                assert browser_log.read_text() == f'http://127.0.0.1:{PORT}/_panel'
         run('check')
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert not (runtime / 'cli.json').exists()
@@ -134,7 +154,10 @@ def run_tests(home, upstream):
         status, html = panel('desktop-on')
         assert status == 200 and '已连接离线翻译' in html
         assert json.loads(path.read_text(encoding='utf-8'))['inferenceGatewayBaseUrl'] == LOCAL_URL
-        assert run('uninstall', check=False).returncode != 0
+        if windows_package:
+            assert run('prepare-uninstall', check=False).returncode != 0
+        else:
+            assert run('uninstall', check=False).returncode != 0
         assert panel('cli-on')[0] == 200
         code = '''import sys, json, gateway
 gateway.os.execv = lambda exe, args: print(json.loads(args[2])['env']['ANTHROPIC_BASE_URL'].split('/cli/')[1])
@@ -170,8 +193,19 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
         assert json.loads(path.read_text(encoding='utf-8')) == previous
         assert (cc / 'cc-switch.db').read_bytes() == db_before
     finally:
-        run('desktop-direct', check=False)
-        run('uninstall')
+        if (runtime / 'service.key').is_file():
+            run('desktop-direct', check=False)
+            run('uninstall')
+        if windows_package:
+            path.unlink(missing_ok=True)
+            (library / '_meta.json').unlink(missing_ok=True)
+            library.rmdir()
+            try:
+                library.parent.rmdir()
+            except OSError:
+                pass
+            if (home / 'setup.log').is_file() and sys.exc_info()[0] is not None:
+                print((home / 'setup.log').read_text(encoding='utf-8-sig', errors='replace')[-18000:])
     assert not runtime.exists()
     assert not list(home.glob('**/claude-thinking-translation.desktop'))
     assert not list(home.glob('**/claude-thinking-translation.lnk'))
@@ -180,9 +214,10 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
 
 
 if __name__ == '__main__':
+    installer = Path(sys.argv[1]).resolve(strict=True) if len(sys.argv) > 1 else None
     with tempfile.TemporaryDirectory(prefix='ctt-test-') as temp, ThreadingHTTPServer(('127.0.0.1', 0), Upstream) as provider:
         Thread(target=provider.serve_forever, daemon=True).start()
         try:
-            run_tests(Path(temp), f'http://127.0.0.1:{provider.server_port}')
+            run_tests(Path(temp), f'http://127.0.0.1:{provider.server_port}', installer)
         finally:
             provider.shutdown()

@@ -1,2 +1,5 @@
 #!/bin/sh
-exec /usr/bin/python3 "$HOME/Library/Application Support/Claude Offline Translation/gateway.py" cli-launch "$@"
+runtime="$HOME/Library/Application Support/Claude Offline Translation"
+python=/usr/bin/python3
+if [ -x "$runtime/venv/bin/python3" ]; then python="$runtime/venv/bin/python3"; fi
+exec "$python" "$runtime/gateway.py" cli-launch "$@"

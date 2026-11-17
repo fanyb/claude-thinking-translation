@@ -14,11 +14,18 @@ service="$domain/$label"
 marker="$runtime/.installed-by-distribution"
 health_url=http://127.0.0.1:15722/_health
 python=/usr/bin/python3
+prebuilt=0
+if [[ -x "$source_dir/venv/bin/python3" && -f "$source_dir/translation-worker" ]]; then
+    python="$source_dir/venv/bin/python3"
+    prebuilt=1
+fi
 
 [[ $# -le 1 && ( $# -eq 0 || ${1:-} == --uninstall ) ]] || fail '运行 install.command 安装，添加 --uninstall 卸载。'
 [[ $(/usr/bin/id -u) != 0 ]] || fail '请在自己的 macOS 用户中运行，安装无需 sudo。'
-developer=$(/usr/bin/xcode-select -p 2>/dev/null) || fail '请先运行 xcode-select --install。安装完成后再重试。'
-"$python" -c 'import sys; sys.exit(sys.version_info < (3, 9))' || fail '需要 Apple 命令行工具提供的 Python 3.9 或以上。'
+if (( ! prebuilt )); then
+    /usr/bin/xcode-select -p >/dev/null 2>&1 || fail '请先运行 xcode-select --install。安装完成后再重试。'
+    "$python" -c 'import sys; sys.exit(sys.version_info < (3, 9))' || fail '需要 Apple 命令行工具提供的 Python 3.9 或以上。'
+fi
 
 if [[ ${1:-} == --uninstall ]]; then
     [[ -f "$marker" ]] || fail '找不到通过这个安装包装好的版本。'
@@ -82,39 +89,24 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-printf '%s\n' '正在本机编译翻译组件和控制面板。第一次编译可能需要几分钟。'
-swift_flags=()
-bridging="$developer/usr/include/swift"
-# CLT 26.0 can declare SwiftBridging twice. Hide the duplicate only for this compile.
-if [[ -f "$bridging/bridging.modulemap" && -f "$bridging/module.modulemap" ]] &&
-   /usr/bin/grep -q 'module SwiftBridging' "$bridging/bridging.modulemap" &&
-   /usr/bin/grep -q 'module SwiftBridging' "$bridging/module.modulemap"; then
-    : > "$temp/empty.modulemap"
-    "$python" - "$bridging/module.modulemap" "$temp" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-temp = Path(sys.argv[2])
-(temp / 'overlay.json').write_text(json.dumps({
-    'version': 0, 'use-external-names': False,
-    'roots': [{'type': 'file', 'name': sys.argv[1], 'external-contents': str(temp / 'empty.modulemap')}],
-}))
-PY
-    swift_flags=(-vfsoverlay "$temp/overlay.json")
+staged_app="$temp/Claude 思考翻译.app"
+worker="$temp/translation-worker"
+if (( prebuilt )); then
+    worker="$source_dir/translation-worker"
+    /usr/bin/ditto "$source_dir/Claude 思考翻译.app" "$staged_app"
+else
+    printf '%s\n' '正在本机编译翻译组件和控制面板。第一次编译可能需要几分钟。'
+    /bin/bash "$source_dir/packaging/build-worker.sh" "$python" "$source_dir/TranslationWorker.swift" "$worker"
+    /bin/mkdir -p -- "$staged_app/Contents/MacOS"
+    /usr/bin/install -m 644 "$source_dir/Info.plist" "$staged_app/Contents/Info.plist"
+    /usr/bin/xcrun clang -fobjc-arc -framework AppKit -mmacosx-version-min=26.0 \
+        "$source_dir/Controls.m" -o "$staged_app/Contents/MacOS/ClaudeOfflineTranslation"
+    /usr/bin/codesign --force --sign - "$staged_app"
 fi
-/usr/bin/xcrun swiftc -target arm64-apple-macos26.0 -O ${swift_flags[@]+"${swift_flags[@]}"} \
-    "$source_dir/TranslationWorker.swift" -o "$temp/translation-worker"
-if ! printf '%s\n' '"The offline translation is ready."' | "$temp/translation-worker" | \
+if ! printf '%s\n' '"The offline translation is ready."' | "$worker" | \
         "$python" -c 'import json, re, sys; sys.exit(not re.search(r"[\u3400-\u9fff]", json.load(sys.stdin) or ""))' 2>/dev/null; then
     fail '离线英译简中暂不可用。请到「系统设置 → 通用 → 语言与地区 → 翻译语言」下载英语（美国）和简体中文后重试。'
 fi
-staged_app="$temp/Claude 思考翻译.app"
-/bin/mkdir -p -- "$staged_app/Contents/MacOS"
-/usr/bin/install -m 644 "$source_dir/Info.plist" "$staged_app/Contents/Info.plist"
-/usr/bin/xcrun clang -fobjc-arc -framework AppKit -mmacosx-version-min=26.0 \
-    "$source_dir/Controls.m" -o "$staged_app/Contents/MacOS/ClaudeOfflineTranslation"
-/usr/bin/codesign --force --sign - "$staged_app"
 /usr/bin/codesign --verify --strict "$staged_app"
 "$python" "$source_dir/gateway.py" self-test
 
@@ -122,7 +114,13 @@ staged_app="$temp/Claude 思考翻译.app"
 /bin/mkdir -m 700 -- "$runtime"
 owns_runtime=1
 /usr/bin/install -m 600 "$source_dir/gateway.py" "$runtime/gateway.py"
-/usr/bin/install -m 700 "$temp/translation-worker" "$runtime/translation-worker"
+/usr/bin/install -m 700 "$worker" "$runtime/translation-worker"
+if (( prebuilt )); then
+    /usr/bin/ditto "$source_dir/venv" "$runtime/venv"
+    /usr/bin/install -m 700 "$source_dir/install.command" "$runtime/install.command"
+    /usr/bin/install -m 600 "$source_dir/claude-zh" "$source_dir/LICENSE" "$runtime"
+    python="$runtime/venv/bin/python3"
+fi
 "$python" - "$runtime" "$label" > "$temp/agent.plist" <<'PY'
 from pathlib import Path
 import plistlib
@@ -131,7 +129,7 @@ import sys
 runtime = Path(sys.argv[1])
 log = str(runtime / 'status.log')
 plistlib.dump({
-    'Label': sys.argv[2], 'ProgramArguments': ['/usr/bin/python3', str(runtime / 'gateway.py'), 'serve'],
+    'Label': sys.argv[2], 'ProgramArguments': [sys.executable, str(runtime / 'gateway.py'), 'serve'],
     'WorkingDirectory': str(runtime), 'EnvironmentVariables': {'HOME': str(Path.home())},
     'KeepAlive': True, 'ThrottleInterval': 3, 'StandardOutPath': log, 'StandardErrorPath': log,
 }, sys.stdout.buffer)

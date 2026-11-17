@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+payload=$(CDPATH='' cd -- "$(dirname -- "$0")/payload" && pwd)
+log=$(mktemp)
+trap 'rm -f -- "$log"' EXIT
+if "$payload/venv/bin/python3" -E -s -X utf8 "$payload/install.py" install "$@" >"$log" 2>&1; then
+    cat "$log"
+    exit 0
+fi
+cat "$log" >&2
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --title='Claude 思考翻译安装未完成' --text="$(cat "$log")"
+    elif command -v kdialog >/dev/null 2>&1; then
+        kdialog --error "$(cat "$log")"
+    fi
+fi
+exit 1

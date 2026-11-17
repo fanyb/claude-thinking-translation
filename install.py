@@ -31,6 +31,7 @@ MODEL = 'translate-en_zh-1_9'
 MODEL_URL = f'https://argos-net.com/v1/{MODEL}.argosmodel'
 MODEL_SHA256 = '433e7c4f034d87fbe2353161e05f18646d7999452f801a4e1f0378522b9850ab'
 MODEL_FILES = ('sentencepiece.model', 'model/config.json', 'model/model.bin', 'model/shared_vocabulary.json')
+BUNDLED = (SOURCE / 'model').is_dir() and (SOURCE / 'venv').is_dir()
 
 
 def xdg(name, default):
@@ -43,7 +44,8 @@ if WINDOWS:
     programs = Path(os.environ.get('APPDATA') or HOME / 'AppData/Roaming') / 'Microsoft/Windows/Start Menu/Programs'
     AUTOSTART = programs / 'Startup' / f'{SERVICE}.lnk'
     SHORTCUT = programs / 'Claude Thinking Translation.lnk'
-    PYTHON = RUNTIME / 'venv/Scripts/python.exe'
+    bundle = RUNTIME / 'venv/python.exe'
+    PYTHON = bundle if bundle.is_file() or (SOURCE / 'venv/python.exe').is_file() else RUNTIME / 'venv/Scripts/python.exe'
 elif MAC:
     RUNTIME = HOME / 'Library/Application Support' / SERVICE
     AUTOSTART = HOME / 'Library/LaunchAgents' / f'{MAC_LABEL}.plist'
@@ -184,13 +186,17 @@ def download_model():
                 raise ValueError('Argos 模型下载大小超过预期。')
     if checksum.hexdigest() != MODEL_SHA256:
         raise ValueError('Argos 模型 SHA-256 校验失败。')
+    extract_model(archive, RUNTIME / 'model')
+    archive.unlink()
+
+
+def extract_model(archive, destination):
     with ZipFile(archive) as model:
         for name in MODEL_FILES:
-            output = RUNTIME / 'model' / name
+            output = destination / name
             output.parent.mkdir(parents=True, exist_ok=True)
             with model.open(f'{MODEL}/{name}') as source, output.open('wb') as target:
                 shutil.copyfileobj(source, target)
-    archive.unlink()
 
 
 def install_portable():
@@ -204,17 +210,25 @@ def install_portable():
     try:
         for file in ('gateway.py', 'argos_worker.py', 'install.py', 'panel.html'):
             shutil.copyfile(SOURCE / file, RUNTIME / file)
-        venv.EnvBuilder(with_pip=True).create(RUNTIME / 'venv')
-        subprocess.run([str(PYTHON), '-m', 'pip', 'install', '--only-binary=:all:',
-                        'ctranslate2==4.9.0', 'sentencepiece==0.2.1', 'numpy<3'], check=True)
-        print('正在下载并校验 Argos 英译简中模型（约 67 MB）。', flush=True)
-        download_model()
+        if BUNDLED:
+            for directory in ('venv', 'model'):
+                shutil.copytree(SOURCE / directory, RUNTIME / directory, symlinks=True)
+            for name in ('LICENSE', 'NOTICES.md'):
+                shutil.copyfile(SOURCE / name, RUNTIME / name)
+        else:
+            venv.EnvBuilder(with_pip=True).create(RUNTIME / 'venv')
+            subprocess.run([str(PYTHON), '-m', 'pip', 'install', '--only-binary=:all:',
+                            'ctranslate2==4.9.0', 'sentencepiece==0.2.1', 'numpy<3'], check=True)
+            print('正在下载并校验 Argos 英译简中模型（约 67 MB）。', flush=True)
+            download_model()
         if call_gateway('self-test') or call_gateway('check-translation'):
             raise ValueError('翻译组件自检失败。')
         KEY.write_text(secrets.token_hex(32), encoding='ascii')
         start()
         write_entry(AUTOSTART, 'start')
         write_entry(SHORTCUT, 'panel')
+        if BUNDLED:
+            (RUNTIME / '.installed-by-package').touch()
     except (Exception, KeyboardInterrupt):
         if KEY.exists():
             stop()
@@ -239,6 +253,8 @@ def main():
                  'cli-on', 'cli-off', 'cli-direct'):
         commands.add_parser(name)
     commands.add_parser('claude').add_argument('args', nargs=argparse.REMAINDER)
+    if WINDOWS:
+        commands.add_parser('prepare-uninstall')
     if sys.argv[1:2] == ['claude']:
         return operate('claude', sys.argv[2:])
     args = parser.parse_args()
@@ -267,21 +283,26 @@ def operate(operation, args=()):
     if not portable and not (MAC and (APPLE / 'gateway.py').is_file()):
         raise ValueError('尚未安装。请先运行 install。')
     root = RUNTIME if portable else APPLE
-    python = PYTHON if portable else Path('/usr/bin/python3')
+    apple_python = APPLE / 'venv/bin/python3'
+    python = PYTHON if portable else apple_python if apple_python.is_file() else Path('/usr/bin/python3')
 
     def gateway_command(*params):
         return call_gateway(*params, root=root, python=python)
 
-    if operation == 'uninstall':
+    if operation in ('uninstall', 'prepare-uninstall'):
+        if operation == 'prepare-uninstall' and not (RUNTIME / '.installed-by-package').is_file():
+            raise ValueError('没有通过 Windows 安装包装好的版本。')
         if not portable:
             return subprocess.call(['/bin/bash', str(SOURCE / 'install.command'), '--uninstall'])
-        if SOURCE == RUNTIME and WINDOWS:
+        if SOURCE == RUNTIME and WINDOWS and operation == 'uninstall':
             raise ValueError('请从 GitHub 检出的目录运行卸载。')
         if gateway_command('check-detached'):
             return 1
+        stop()
         AUTOSTART.unlink(missing_ok=True)
         SHORTCUT.unlink(missing_ok=True)
-        stop()
+        if operation == 'prepare-uninstall':
+            return 0
         remove_runtime()
         print('已卸载本地翻译。')
         return 0

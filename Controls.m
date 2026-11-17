@@ -15,14 +15,27 @@
 
 @implementation Controls
 
+- (NSURL *)runtime {
+    NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory
+                                                         inDomains:NSUserDomainMask].firstObject;
+    return [support URLByAppendingPathComponent:@"Claude Offline Translation" isDirectory:YES];
+}
+
 - (NSString *)run:(NSString *)action ok:(BOOL *)ok {
-    NSURL *home = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory
-                                                      inDomains:NSUserDomainMask].firstObject;
-    NSURL *script = [home URLByAppendingPathComponent:@"Claude Offline Translation/gateway.py"];
+    NSURL *runtime = [self runtime];
+    NSURL *python = [runtime URLByAppendingPathComponent:@"venv/bin/python3"];
+    if (![NSFileManager.defaultManager isExecutableFileAtPath:python.path]) {
+        python = [NSURL fileURLWithPath:@"/usr/bin/python3"];
+    }
     NSTask *task = [NSTask new];
     NSPipe *output = [NSPipe pipe];
-    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/python3"];
-    task.arguments = @[script.path, action];
+    if ([action isEqualToString:@"uninstall"]) {
+        task.executableURL = [NSURL fileURLWithPath:@"/bin/bash"];
+        task.arguments = @[[runtime URLByAppendingPathComponent:@"install.command"].path, @"--uninstall"];
+    } else {
+        task.executableURL = python;
+        task.arguments = @[[runtime URLByAppendingPathComponent:@"gateway.py"].path, action];
+    }
     task.standardOutput = output;
     task.standardError = output;
     NSError *error = nil;
@@ -35,6 +48,20 @@
     *ok = task.terminationStatus == 0;
     NSString *message = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     return [message stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+- (void)uninstall:(id)sender {
+    NSAlert *confirm = [NSAlert new];
+    confirm.messageText = @"卸载 Claude 思考翻译？";
+    confirm.informativeText = @"请先恢复直连并退出使用翻译的 Claude 和 CLI 会话。卸载会删除本机翻译缓存。";
+    [confirm addButtonWithTitle:@"取消"];
+    [confirm addButtonWithTitle:@"卸载"];
+    if ([confirm runModal] != NSAlertSecondButtonReturn) return;
+    BOOL ok;
+    NSString *result = [self run:@"uninstall" ok:&ok];
+    if (ok) [NSApp terminate:nil];
+    self.notice.stringValue = result.length ? result : @"卸载未完成。";
+    self.notice.textColor = NSColor.systemRedColor;
 }
 
 - (void)refresh {
@@ -95,7 +122,7 @@
     self.direct = [self button:@"恢复直连" action:@"direct"];
     self.notice = [self label:@"继续用过翻译的会话时，点「恢复英文」可保留工具回传。" size:12 weight:NSFontWeightRegular];
     self.notice.textColor = NSColor.secondaryLabelColor;
-    NSTextField *help = [self label:@"终端运行 claude-zh。切换 CC Switch 供应商后重开该命令。" size:12 weight:NSFontWeightRegular];
+    NSTextField *help = [self label:@"终端运行 ~/.local/bin/claude-zh。切换 CC Switch 供应商后重开该命令。" size:12 weight:NSFontWeightRegular];
     help.textColor = NSColor.secondaryLabelColor;
 
     NSTextField *cliTitle = [self label:@"Claude Code CLI" size:14 weight:NSFontWeightMedium];
@@ -129,6 +156,10 @@
     NSMenuItem *item = [NSMenuItem new];
     [menu addItem:item];
     item.submenu = [NSMenu new];
+    if ([NSFileManager.defaultManager isExecutableFileAtPath:[[self runtime] URLByAppendingPathComponent:@"install.command"].path]) {
+        NSMenuItem *uninstall = [item.submenu addItemWithTitle:@"卸载 Claude 思考翻译…" action:@selector(uninstall:) keyEquivalent:@""];
+        uninstall.target = self;
+    }
     [item.submenu addItemWithTitle:@"退出 Claude 思考翻译" action:@selector(terminate:) keyEquivalent:@"q"];
     NSApp.mainMenu = menu;
     [self refresh];
