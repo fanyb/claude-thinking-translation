@@ -147,10 +147,11 @@ def set_cli_mode(command):
                 file.write(secrets.token_bytes(32))
     state = 'english' if command == 'off' else command
     atomic_json(CLI_MODE, {'mode': state})
+    launcher = 'python install.py claude' if (ROOT / 'argos_worker.py').is_file() else 'claude-zh'
     return {
-        'on': '翻译已开启。在终端运行 claude-zh 进入翻译会话。',
+        'on': f'翻译已开启。在终端运行 {launcher} 进入翻译会话。',
         'english': '已恢复英文。已接入的会话从下一次请求生效。',
-        'direct': '新开的 claude-zh 会直接连接当前供应商。已接入的会话先退出再重开。',
+        'direct': f'新开的 {launcher} 会直接连接当前供应商。已接入的会话先退出再重开。',
     }[state]
 
 
@@ -203,7 +204,7 @@ def launch_cli(args):
             ticket = cli_ticket(base, auth)
             healthy, health = probe(PORT, '/_health')
             if not healthy or json.loads(health).get('cli') is not True:
-                raise ValueError('CLI 翻译服务暂时不可用。可在「Claude 思考翻译」中恢复 CLI 直连。')
+                raise ValueError('CLI 翻译服务暂时不可用。可运行普通 claude 暂时恢复直连。')
             options = {'env': {'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{PORT}/cli/{ticket}'}}
             model = (env.get('ANTHROPIC_MODEL') or '').partition('[')[0]
             display = []
