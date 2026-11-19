@@ -83,4 +83,6 @@ Linux Release 版可用自带的 Python 卸载。默认安装路径下的命令�
 
 这是独立工具。中文显示取决于模型返回的可见思考和离线译文质量。所有工具权限仍由 Claude Code 管理。
 
+翻译工作进程退出、超时、输出损坏或没有产出中文时，网关会重建工作进程，并重试当前片段一次。Mac 系统翻译会话失效时也会先重建系统会话。持续失败的片段保留原文，模型回复和工具调用继续转发；历史中的英文不会重新翻译。
+
 Argos 版在安装时从 [Argos 模型索引](https://github.com/argosopentech/argospm-index) 下载英译中模型，模型源自 Jörg Tiedemann 与 Santhosh Thottingal 的 [OPUS-MT](https://aclanthology.org/2020.eamt-1.61/)，原模型许可为 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。本仓库源码采用 [MIT 许可](LICENSE)。

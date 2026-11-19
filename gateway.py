@@ -400,24 +400,29 @@ class TranslationEngine:
 
     def translate(self, plain):
         with self.lock:
-            try:
-                if self.worker is None or self.worker.poll() is not None:
-                    self.close()
-                    argos = ROOT / 'argos_worker.py'
-                    command = [sys.executable, '-X', 'utf8', str(argos)] if argos.is_file() else [ROOT / 'translation-worker']
-                    self.worker = subprocess.Popen(command, stdin=subprocess.PIPE,
-                                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                    self.lines = Queue()
-                    Thread(target=self.read, args=(self.worker.stdout, self.lines), daemon=True).start()
-                result = self.ask(plain)
-                if not isinstance(result, str) or not HAN.search(result):
-                    # Terminal punctuation helps the offline model translate fragments.
-                    retry = plain if plain[-1:] in '.!?' else plain + '.'
-                    result = self.ask(retry)
-                return result, 'model kept English'
-            except (OSError, ValueError, Empty):
+            reason = 'worker unavailable'
+            for attempt in range(2):
+                try:
+                    if self.worker is None or self.worker.poll() is not None:
+                        self.close()
+                        argos = ROOT / 'argos_worker.py'
+                        command = [sys.executable, '-X', 'utf8', str(argos)] if argos.is_file() else [ROOT / 'translation-worker']
+                        self.worker = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                        self.lines = Queue()
+                        Thread(target=self.read, args=(self.worker.stdout, self.lines), daemon=True).start()
+                    # A fresh process recovers stale native translation sessions as well as crashes.
+                    text = plain + '.' if attempt and plain[-1:] not in '.!?' else plain
+                    result = self.ask(text)
+                    if isinstance(result, str) and HAN.search(result):
+                        return result, ''
+                    reason = 'model kept English'
+                except (OSError, ValueError, Empty):
+                    reason = 'worker unavailable'
                 self.close()
-                return None, 'worker unavailable'
+                if not attempt:
+                    print(f'Translation worker recovery: restarting after {reason}.', flush=True)
+            return None, reason
 
     def ask(self, text):
         self.worker.stdin.write((json.dumps(text) + '\n').encode())
@@ -439,7 +444,10 @@ class TranslationEngine:
             if self.worker.poll() is None:
                 self.worker.kill()
             self.worker.wait()
-            self.worker.stdin.close()
+            try:
+                self.worker.stdin.close()
+            except OSError:
+                pass
             self.worker.stdout.close()
             self.worker = None
 

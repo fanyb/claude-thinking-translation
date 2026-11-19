@@ -1,6 +1,8 @@
-## v1.1.1 更新
+## v1.1.2 更新
 
-修复 macOS 上 cmux 启动或恢复 Claude Code 会话时跳过离线翻译的问题。CLI 会继续使用 cmux 的侧栏和通知设置。[cmux 设置与恢复会话说明](https://github.com/fanyb/claude-thinking-translation#在-cmux-中使用-cli)
+修复离线翻译进程持续返回英文却没有自动恢复的问题。工作进程退出、超时、输出损坏或未产出中文时，自动重建并重试当前片段一次。Mac 系统翻译会话也会在失效后重建。仍无法翻译的片段保留原文，工具调用继续转发。
+
+保留 v1.1.1 的 cmux 启动和手动恢复会话支持。[cmux 设置与恢复会话说明](https://github.com/fanyb/claude-thinking-translation#在-cmux-中使用-cli)
 
 ## 选电脑对应的安装包
 

@@ -20,4 +20,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python -X utf8 -m unittest -v test_translation
       - run: python -X utf8 test_install.py
