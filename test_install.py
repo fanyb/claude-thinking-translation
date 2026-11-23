@@ -191,7 +191,7 @@ gateway.launch_cli(['--model', 'deepseek-v4-1-flash-261017'])
             translated = ''.join(e['delta']['thinking'] for e in events if e.get('delta', {}).get('type') == 'thinking_delta')
             assert re.search(r'[\u3400-\u9fff]', translated)
             assert TOOL in [e.get('content_block') for e in events]
-            assert any(e.get('delta', {}).get('signature') == ORIGINAL['signature'] for e in events) == (mode == 'cli')
+            assert any(e.get('delta', {}).get('signature') == ORIGINAL['signature'] for e in events)
             replay = {'messages': [{'role': 'assistant', 'content': [{**ORIGINAL, 'thinking': translated}, TOOL]}]}
             assert post(endpoint, replay) == STREAM[-1:]
             assert panel(mode + '-off')[0] == 200

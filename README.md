@@ -6,6 +6,8 @@
 
 从 [GitHub Releases](https://github.com/fanyb/claude-thinking-translation/releases/latest) 选择对应的文件。安装包自带 Python，安装过程无需终端。完成后自动打开图形面板。
 
+**v1.2.0** 将桌面端与 CLI 统一为按可见思考协议翻译，移除模型名称白名单，并支持 Orca 自动附加的启动参数。新模型只要返回相同格式的可见思考，就无需再补模型正则。[支持范围](#支持范围) · [Orca 设置与恢复会话](#在-orca-中使用) · [cmux 设置与恢复会话](#在-cmux-中使用-cli)
+
 | 系统 | 下载文件 | 安装方式 |
 | --- | --- | --- |
 | macOS 26 或以上，Apple 芯片 | `macOS-Apple-Silicon.dmg` | 双击打开磁盘映像，再打开「安装 Claude 思考翻译」，点击「安装」。 |
@@ -47,6 +49,16 @@
 
 要恢复英文，在面板的 CLI 卡片点「恢复英文」。要让新会话恢复原连接，点「恢复直连」，等正在执行的工具完成后再退出并重开相关会话。也可清空 cmux 的 Claude Binary Path，恢复它原来的启动方式。
 
+## 在 Orca 中使用
+
+安装 v1.2.0 或更新版本，在 Orca 的「设置 → 代理 → Claude」展开设置，将「命令」改为翻译启动器的完整路径。Mac 系统离线版为 `/Users/你的用户名/.local/bin/claude-zh`。保持「Claude 思考翻译」面板的 CLI 翻译开启，再新建 Claude 会话。
+
+Orca 聊天自动附加的 `fastMode` 和 `user,project,local` 设置来源会保留，思考翻译通过同一个本地服务完成。已有会话不会被强制重启；等当前任务结束后，关闭原标签页，再从 Orca 会话历史恢复。新请求才会使用新入口，历史英文不会重新翻译。
+
+完成后若思考区被折叠，依次展开「工作了…」回合详情、工具摘要和「思考了…」，即可查看中文思考。
+
+恢复英文可在翻译面板点「恢复英文」。恢复 Orca 原启动方式，可在上述 Claude「命令」旁点「重置」，再正常重开会话。供应商仍由 CC Switch 管理，官方程序和更新保持原样。
+
 ## 支持范围
 
 | 环境 | 默认引擎 | 使用入口 |
@@ -58,7 +70,11 @@
 
 从源码安装 Argos 时，需要 Python 3.10+（推荐 3.12）、可用的原生依赖和首次联网下载约 67 MB 模型。macOS 也可从源码使用 `install --engine argos`。[CTranslate2 环境要求](https://opennmt.net/CTranslate2/installation.html)
 
-桌面端识别 **DeepSeek V4.1 Flash** 思考流。CLI 还支持 **GLM 5.3 / 5.3 Flash** 和沿用的 **Ark Code Latest** 路由。其他模型照常转发。需要使用已经通过 CC Switch 配好并且能发送请求的第三方供应商。模型未返回可见思考时没有文本可译。
+桌面端和 CLI 按 **Anthropic Messages 协议的可见 `thinking` 内容**翻译，不按模型名称或版本筛选。GLM、DeepSeek、豆包、Kimi、OpenAI 等，只要供应商直接返回此格式，或 CC Switch 将思考内容转为此格式，就可以使用同一套翻译逻辑。模型别名和后续版本不需要再补正则。CLI 启动器也会为接入翻译的会话启用思考显示，并保留显式的 `--thinking-display` 选项。
+
+CC Switch 可将 Chat 的 `reasoning_content` 和 Responses 的公开思考摘要转换成 `thinking`。OpenAI 通常只公开摘要，需要上游请求启用摘要；没有返回可见文本时不会显示译文。`signature`、加密思考、`redacted_thinking`、工具参数及最终答案不会被翻译；后续请求会从本机缓存还原思考原文和签名。需要使用已配置好、能正常发请求的供应商。[CC Switch 思考转换源码](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/proxy/providers/reasoning_bridge.rs) · [OpenAI 思考摘要](https://developers.openai.com/api/docs/guides/reasoning#reasoning-summaries) · [Ark 深度思考](https://docs.volcengine.com/docs/ark/deep-thinking?lang=zh)
+
+如果 Desktop 配置页已经是翻译地址，但新会话仍显示英文，请检查是否已点击「Inference configuration → Apply Changes」并按官方提示重新启动 Claude。运行中的程序可能仍缓存原网关地址；只改配置文件不会立即更新它。先完成正在执行的任务再重启，历史英文不会重新翻译。
 
 ## 手动安装和使用
 

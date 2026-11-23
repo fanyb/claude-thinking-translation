@@ -8,7 +8,7 @@ on:
     inputs:
       version:
         description: Installer version
-        default: '1.1.0'
+        default: '1.2.0'
         required: true
 
 permissions:
@@ -36,10 +36,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Test protocol translation and managed launchers
+        run: |
+          python -X utf8 -m unittest -v test_translation
+          python -X utf8 gateway.py self-test
       - name: Build installer
         shell: bash
         env:
-          CTT_VERSION: ${{ inputs.version || '1.1.0' }}
+          CTT_VERSION: ${{ inputs.version || '1.2.0' }}
         run: |
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then CTT_VERSION="${GITHUB_REF_NAME#v}"; fi
           python -X utf8 packaging/build.py "$CTT_VERSION"

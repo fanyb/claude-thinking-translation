@@ -43,8 +43,6 @@ THOUGHT = {'thinking', 'redacted_thinking'}
 HAN = re.compile(r'[\u3400-\u9fff]')
 WORDS = re.compile(r'\b[A-Za-z]{2,}\b')
 SENTENCE = re.compile(r'(?<!\d)[.!?。！？]["”)]?(?:\s+|$)|\n+')
-DEEPSEEK = re.compile(r'deepseek-v4[.-]1-flash(?:[-\d]*)', re.IGNORECASE)
-CLI_THINKING = re.compile(r'(?:deepseek-v4[.-]1-flash|glm-5\.3(?:-flash)?)(?:[-\d]*)', re.IGNORECASE)
 CLI_HEADERS = {'authorization': 'ANTHROPIC_AUTH_TOKEN', 'x-api-key': 'ANTHROPIC_API_KEY'}
 
 
@@ -213,6 +211,28 @@ def cmux_launch_settings(args):
     return options, args[:index] + args[index + 2:]
 
 
+def orca_launch_settings(args):
+    if os.environ.get('ORCA_STRUCTURED_SESSION') != '1' or not os.environ.get('ORCA_AGENT_SESSION_ID'):
+        return None
+    flags = args[:args.index('--')] if '--' in args else args
+    overrides = [a for a in flags if a.split('=', 1)[0] in ('--settings', '--setting-sources', '--bare')]
+    if sorted(overrides) != ['--setting-sources=user,project,local', '--settings']:
+        return None
+    index = flags.index('--settings')
+    if index + 1 >= len(flags):
+        return None
+    try:
+        options = json.loads(flags[index + 1])
+    except ValueError:
+        return None
+    # Orca injects fastMode; explicit connection overrides must still bypass translation.
+    if not isinstance(options, dict) or options.keys() - {'fastMode'}:
+        return None
+    if 'fastMode' in options and not isinstance(options['fastMode'], bool):
+        return None
+    return options, args[:index] + args[index + 2:]
+
+
 def launch_cli(args):
     forwarded = args
     # Leave explicit session configuration and native maintenance commands with Claude Code.
@@ -220,9 +240,11 @@ def launch_cli(args):
     flags = args[:args.index('--')] if '--' in args else args
     overrides = [flag for flag in flags if flag.split('=', 1)[0] in ('--settings', '--setting-sources', '--bare')]
     state = cli_mode()
-    cmux = cmux_launch_settings(args) if state != 'direct' and overrides == ['--settings'] else None
-    if state != 'direct' and not set(args[:1]) & bypass and (not overrides or cmux is not None):
-        options, model_args = cmux if cmux is not None else ({}, args)
+    managed = None
+    if state != 'direct':
+        managed = cmux_launch_settings(args) if overrides == ['--settings'] else orca_launch_settings(args)
+    if state != 'direct' and not set(args[:1]) & bypass and (not overrides or managed is not None):
+        options, model_args = managed if managed is not None else ({}, args)
         settings = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'settings.json'
         env = load(settings).get('env', {}) if settings.exists() else {}
         base = env.get('ANTHROPIC_BASE_URL')
@@ -235,14 +257,12 @@ def launch_cli(args):
             if not healthy or json.loads(health).get('cli') is not True:
                 raise ValueError('CLI 翻译服务暂时不可用。可运行普通 claude 暂时恢复直连。')
             options['env'] = {'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{PORT}/cli/{ticket}'}
-            model = (env.get('ANTHROPIC_MODEL') or '').partition('[')[0]
             display = []
-            if CLI_THINKING.fullmatch(model) or model == 'ark-code-latest':
-                options['showThinkingSummaries'] = True
-                if sys.stdin.isatty() and sys.stdout.isatty() and '-p' not in args and '--print' not in args:
-                    options['verbose'] = True
-                if not any(a.split('=', 1)[0] == '--thinking-display' for a in args):
-                    display = ['--thinking-display', 'summarized']
+            options['showThinkingSummaries'] = True
+            if sys.stdin.isatty() and sys.stdout.isatty() and '-p' not in args and '--print' not in args:
+                options['verbose'] = True
+            if not any(a.split('=', 1)[0] == '--thinking-display' for a in args):
+                display = ['--thinking-display', 'summarized']
             forwarded = ['--settings', json.dumps(options), *display]
             forwarded += model_args
     command = 'claude.exe' if os.name == 'nt' else 'claude'
@@ -353,12 +373,16 @@ def restore_originals(body):
     return restored
 
 
-def signature_key(signature):
-    return 'signature:' + hashlib.sha256(signature.encode()).hexdigest()
+def signature_key(signature, thinking=None):
+    if thinking is None:
+        return 'signature:' + hashlib.sha256(signature.encode()).hexdigest()
+    data = json.dumps([signature, thinking], ensure_ascii=False).encode()
+    return 'translation:' + hashlib.sha256(data).hexdigest()
 
 
-def save_signature(block):
-    key = signature_key(block['signature'])
+def save_signature(block, translated):
+    # Some compatible providers reuse a signature for different thinking blocks.
+    key = signature_key(block['signature'], translated)
     with closing(sqlite3.connect(REPLAY, timeout=5)) as db, db:
         db.execute('INSERT OR IGNORE INTO replay VALUES (?, ?)', (key, json.dumps(block, ensure_ascii=False)))
 
@@ -378,7 +402,11 @@ def restore_signatures(body):
                 signature = block.get('signature') if isinstance(block, dict) and block.get('type') == 'thinking' else None
                 if not isinstance(signature, str) or not signature:
                     continue
-                row = db.execute('SELECT blocks FROM replay WHERE key=?', (signature_key(signature),)).fetchone()
+                row = db.execute('SELECT blocks FROM replay WHERE key=?',
+                                 (signature_key(signature, block.get('thinking', '')),)).fetchone()
+                if row is None and HAN.search(block.get('thinking', '')):
+                    # Keep histories translated by older installations usable.
+                    row = db.execute('SELECT blocks FROM replay WHERE key=?', (signature_key(signature),)).fetchone()
                 if row:
                     original = json.loads(row[0])
                     if block.get('thinking') != original.get('thinking'):
@@ -496,33 +524,18 @@ def split_sentence(text):
     return text[:end], text[end:]
 
 
-def supported_model(model, cli, requested):
-    if not isinstance(model, str):
-        return False
-    if cli and model == 'auto' and requested == 'ark-code-latest':
-        return True
-    return bool((CLI_THINKING if cli else DEEPSEEK).fullmatch(model))
-
-
-def translated_events(frames, translate, save, cli=False, requested=None):
+def translated_events(frames, translate, save, cli=False):
     originals, tool_ids = [], []
-    pending, active = '', None
-    supported = False
+    pending, displayed, active = '', '', None
     for raw, event in frames:
         kind, index = event.get('type'), event.get('index')
-        if kind == 'message_start':
-            model = event.get('message', {}).get('model', '')
-            supported = supported_model(model, cli, requested)
-        if not supported:
-            yield raw, event
-            continue
         if kind == 'content_block_start':
             block = event['content_block']
             if block['type'] == 'thinking':
                 originals.append((index, copy.deepcopy(block)))
-                active, pending = index, block.get('thinking', '')
-                start = {'type': 'thinking', 'thinking': ''}
-                if cli:
+                active, pending, displayed = index, block.get('thinking', ''), ''
+                start = {**block, 'thinking': ''}
+                if cli or block.get('signature'):
                     start['signature'] = ''
                 yield None, {**event, 'content_block': start}
                 continue
@@ -544,14 +557,18 @@ def translated_events(frames, translate, save, cli=False, requested=None):
                         sentence, pending = split_sentence(pending)
                         if not sentence:
                             break
-                        yield None, content_delta(index, translate(sentence))
+                        text = translate(sentence)
+                        displayed += text
+                        yield None, content_delta(index, text)
                     continue
             if kind == 'content_block_stop':
                 if pending:
-                    yield None, content_delta(index, translate(pending))
-                if cli and original.get('signature'):
-                    # CLI histories may retain thinking even in an assistant turn without a tool.
-                    save_signature(original)
+                    text = translate(pending)
+                    displayed += text
+                    yield None, content_delta(index, text)
+                if original.get('signature'):
+                    # Signed/encrypted context must also survive turns without a tool.
+                    save_signature(original, displayed)
                     yield None, {'type': 'content_block_delta', 'index': index, 'delta': {
                         'type': 'signature_delta', 'signature': original['signature']}}
                 pending, active = '', None
@@ -586,9 +603,9 @@ def serialize(event):
     return (f'event: {event["type"]}\ndata: ' + json.dumps(event, ensure_ascii=False) + '\n\n').encode()
 
 
-def translate_response(payload, translate, cli=False, requested=None):
+def translate_response(payload, translate, cli=False):
     message = json.loads(payload)
-    if not isinstance(message, dict) or not supported_model(message.get('model'), cli, requested):
+    if not isinstance(message, dict):
         return payload
     blocks = message.get('content')
     if not isinstance(blocks, list):
@@ -599,10 +616,9 @@ def translate_response(payload, translate, cli=False, requested=None):
     if not thought:
         return payload
     for index, block in thought:
-        blocks[index] = {'type': 'thinking', 'thinking': translate(block.get('thinking', ''))}
-        if cli and block.get('signature'):
-            save_signature(block)
-            blocks[index]['signature'] = block['signature']
+        blocks[index] = {**block, 'thinking': translate(block.get('thinking', ''))}
+        if block.get('signature'):
+            save_signature(block, blocks[index]['thinking'])
     if ids:
         save_originals(ids, all_originals)
     return json.dumps(message, ensure_ascii=False).encode()
@@ -719,7 +735,7 @@ class Relay(BaseHTTPRequestHandler):
             self.gateway_error(404, 'Gateway endpoint not found.')
             return
         outgoing = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
-        body = requested = None
+        body = None
         try:
             if cli:
                 _, _, ticket, endpoint = path.path.split('/', 3)
@@ -752,10 +768,7 @@ class Relay(BaseHTTPRequestHandler):
                 body = self.rfile.read(length)
             if valid and body and not self.headers.get('Content-Encoding'):
                 data = json.loads(body)
-                requested = data.get('model')
-                restored = restore_originals(data)
-                if cli:
-                    restored += restore_signatures(data)
+                restored = restore_signatures(data) + restore_originals(data)
                 if restored:
                     body = json.dumps(data, ensure_ascii=False).encode()
                     print(f'{"CLI " if cli else ""}Tool replay: restored {restored} original blocks.', flush=True)
@@ -778,7 +791,7 @@ class Relay(BaseHTTPRequestHandler):
             streaming = 'text/event-stream' in mime
             payload = None
             if change and not streaming and 'json' in mime:
-                payload = translate_response(response.read(), translator.translate, cli, requested)
+                payload = translate_response(response.read(), translator.translate, cli)
             self.send_response(response.status)
             for key, value in response.getheaders():
                 if key.lower() not in HOP and not (change and key.lower() in ('etag', 'content-md5')):
@@ -793,7 +806,7 @@ class Relay(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
             elif streaming and change:
                 frames = upstream_frames(response)
-                for raw, event in translated_events(frames, translator.translate, save_originals, cli, requested):
+                for raw, event in translated_events(frames, translator.translate, save_originals, cli):
                     self.wfile.write(raw if raw is not None else serialize(event))
                     self.wfile.flush()
             else:
@@ -842,13 +855,14 @@ def self_test():
         rows = list(translated_events(map(wire, events), lambda _: '中文。', save_originals))
         thoughts = [e['delta']['thinking'] for _, e in rows if e.get('delta', {}).get('type') == 'thinking_delta']
         assert thoughts == ['中文。', '中文。']
-        assert not any(e.get('delta', {}).get('type') == 'signature_delta' for _, e in rows)
+        assert any(e.get('delta', {}).get('signature') == original['signature'] for _, e in rows)
         assert (serialize(events[6]), events[6]) in rows
         body = {'messages': [{'role': 'assistant', 'content': [{'type': 'redacted_thinking', 'data': 'ignored'}, tool]}]}
         assert restore_originals(body) == 1 and body['messages'][0]['content'] == [original, tool]
         assert restore_originals(body) == 1 and body['messages'][0]['content'] == [original, tool]
-        events[0]['message']['model'] = 'another-provider'
-        assert list(translated_events(map(wire, events), lambda _: '中文。', save_originals)) == list(map(wire, events))
+        passthrough = [events[0], {'type': 'content_block_start', 'index': 0,
+                       'content_block': {'type': 'text', 'text': 'No visible thinking.'}}, events[-1]]
+        assert list(translated_events(map(wire, passthrough), lambda _: '中文。', save_originals)) == list(map(wire, passthrough))
         payload = b': ping\r\nevent: ping\r\ndata: {"type":"ping"}\r\n\r\n'
         assert parse_frame(payload.splitlines(keepends=True)) == (payload, {'type': 'ping'})
         if os.name != 'nt':
@@ -868,10 +882,9 @@ def self_test():
         events[0]['message']['model'] = 'glm-5.3-flash'
         rows = list(translated_events(map(wire, events[:6] + events[-2:]), lambda _: '中文。', save_originals, cli=True))
         assert any(e.get('delta', {}).get('signature') == original['signature'] for _, e in rows)
-        body = {'messages': [{'role': 'assistant', 'content': [{**original, 'thinking': '中文。'}]}]}
+        displayed = ''.join(e['delta']['thinking'] for _, e in rows if e.get('delta', {}).get('type') == 'thinking_delta')
+        body = {'messages': [{'role': 'assistant', 'content': [{**original, 'thinking': displayed}]}]}
         assert restore_signatures(body) == 1 and body['messages'][0]['content'] == [original]
-        assert supported_model('auto', True, 'ark-code-latest') and not supported_model('auto', False, 'ark-code-latest')
-        assert not supported_model('auto', True, 'unknown-model')
         cmux_settings = Path(directory) / '.cmuxterm/claude-settings' / ('a' * 32 + '.json')
         cmux_settings.parent.mkdir(parents=True)
         options = {'hooks': {'Stop': []}, 'preferredNotifChannel': 'terminal_bell'}
